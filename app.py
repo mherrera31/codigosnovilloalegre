@@ -146,7 +146,7 @@ if app_mode == "🛠️ Creador de QRs":
             conn = get_db_connection()
             branches = conn.execute("SELECT * FROM branches").fetchall()
             conn.close()
-            allowed_branches = st.multilet("Sucursales permitidas (dejar en blanco para todas)", options=[branch['name'] for branch in branches])
+            allowed_branches = st.multiselect("Sucursales permitidas (dejar en blanco para todas)", options=[branch['name'] for branch in branches])
             count = st.number_input("Cantidad de tarjetas a generar (lote)", min_value=1, max_value=100, value=1)
         submitted = st.form_submit_button("🚀 Generar Tarjetas", type="primary")
 
