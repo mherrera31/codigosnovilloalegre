@@ -1,15 +1,24 @@
-# db_service.py
-from db_config import supabase
+# db_service.py (ACTUALIZADO para usar requests)
+import requests
 import streamlit as st
 import pandas as pd
+import json
+import auth
+from db_config import POSTGREST_ENDPOINT, get_headers
 
 # --- Funciones de Lectura General ---
 
-def get_data_table(table_name: str):
-    """Obtiene todos los datos de una tabla específica."""
+def get_data_table(table_name: str, select_params: str = '*'):
+    """Obtiene datos de una tabla usando la API REST de PostgREST."""
+    url = f"{POSTGREST_ENDPOINT}/{table_name}?select={select_params}"
+    
+    # Usar el token del usuario si está logueado, sino usar la clave anónima (solo para lectura pública)
+    token = st.session_state.get('token')
+    
     try:
-        response = supabase.from_(table_name).select('*').execute()
-        return response.data
+        response = requests.get(url, headers=get_headers(token))
+        response.raise_for_status()
+        return response.json()
     except Exception as e:
         st.error(f"Error al cargar datos de {table_name}: {e}")
         return []
@@ -22,58 +31,63 @@ def get_roles():
     """Obtiene la lista de roles."""
     return get_data_table('roles')
 
-def get_issuers():
-    """Obtiene la lista de emisores."""
-    return get_data_table('issuers')
-
-def get_promos():
-    """Obtiene la lista de promociones."""
-    return get_data_table('promos')
-
 # --- Funciones de Creación (Administración de Metadata) ---
+
+def create_entry(table_name: str, payload: dict):
+    """Función genérica para crear una entrada en cualquier tabla."""
+    url = f"{POSTGREST_ENDPOINT}/{table_name}"
+    
+    # La creación debe usar el token del Admin
+    token = st.session_state.get('token') 
+    if not token:
+        st.error("Se requiere autenticación para esta acción.")
+        return False
+        
+    try:
+        # Usamos la cabecera 'Prefer' para obtener el objeto creado en la respuesta
+        headers = get_headers(token)
+        headers['Prefer'] = 'return=representation' 
+        
+        response = requests.post(url, headers=headers, data=json.dumps(payload))
+        response.raise_for_status()
+        
+        return True
+    except requests.exceptions.HTTPError as err:
+        st.error(f"Error al crear en {table_name}: {err.response.json().get('message', str(err))}")
+        return False
+    except Exception as e:
+        st.error(f"Error inesperado al crear: {e}")
+        return False
+
 
 def create_branch(name: str, address: str):
     """Inserta una nueva sucursal."""
-    try:
-        data, count = supabase.from_('branches').insert({'name': name, 'address': address}).execute()
-        if count:
-            st.success(f"Sucursal '{name}' creada con éxito.")
-            return True
-        return False
-    except Exception as e:
-        st.error(f"Error al crear sucursal: {e}")
-        return False
+    if create_entry('branches', {'name': name, 'address': address}):
+        st.success(f"Sucursal '{name}' creada con éxito.")
+        return True
+    return False
 
 def create_issuer(name: str):
     """Inserta un nuevo emisor."""
-    try:
-        data, count = supabase.from_('issuers').insert({'issuer_name': name}).execute()
-        if count:
-            st.success(f"Emisor '{name}' creado con éxito.")
-            return True
-        return False
-    except Exception as e:
-        st.error(f"Error al crear emisor: {e}")
-        return False
+    if create_entry('issuers', {'issuer_name': name}):
+        st.success(f"Emisor '{name}' creado con éxito.")
+        return True
+    return False
 
 def create_promo(type_name: str, is_percentage: bool, is_cash_value: bool, is_product: bool, value: float, description: str):
     """Inserta un nuevo tipo de promoción."""
-    try:
-        data, count = supabase.from_('promos').insert({
-            'type_name': type_name, 
-            'is_percentage': is_percentage, 
-            'is_cash_value': is_cash_value, 
-            'is_product': is_product, 
-            'value': value, 
-            'description': description
-        }).execute()
-        if count:
-            st.success(f"Promoción '{type_name}' creada con éxito.")
-            return True
-        return False
-    except Exception as e:
-        st.error(f"Error al crear promoción: {e}")
-        return False
+    payload = {
+        'type_name': type_name, 
+        'is_percentage': is_percentage, 
+        'is_cash_value': is_cash_value, 
+        'is_product': is_product, 
+        'value': value, 
+        'description': description
+    }
+    if create_entry('promos', payload):
+        st.success(f"Promoción '{type_name}' creada con éxito.")
+        return True
+    return False
 
 def render_config_management():
     """Módulo de Streamlit para la gestión de datos maestros (Solo Admin)."""
