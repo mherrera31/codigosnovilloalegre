@@ -5,6 +5,4 @@ pandas
 pyzbar
 opencv-python-headless
 fpdf2
-postgrest-py
-storage-py
-gotrue-py
+requests  # Usaremos requests para llamadas directas a la API REST de Supabase
