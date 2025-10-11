@@ -1,83 +1,66 @@
-# auth.py
-from db_config import get_supabase_client
+# auth.py (ACTUALIZADO para usar requests)
+import requests
 import streamlit as st
-
-supabase = get_supabase_client()
+from db_config import AUTH_ENDPOINT, POSTGREST_ENDPOINT, SUPABASE_KEY, get_headers
 
 def sign_in(email, password):
     """
-    Intenta iniciar sesión y, si es exitoso, obtiene el perfil (rol y sucursal) del usuario.
+    Intenta iniciar sesión usando Supabase Auth a través de llamadas requests.
     """
+    url = f"{AUTH_ENDPOINT}/token?grant_type=password"
+    payload = {"email": email, "password": password}
+    
     try:
-        # 1. Autenticación con Supabase Auth
-        response = supabase.auth.sign_in_with_password({
-            "email": email,
-            "password": password,
-        })
+        response = requests.post(url, headers=get_headers(), json=payload)
+        response.raise_for_status() # Lanza un error para códigos 4xx/5xx
+
+        auth_data = response.json()
+        token = auth_data['access_token']
+        user_id = auth_data['user']['id']
         
-        if response.user and response.session:
-            user_id = response.user.id
+        # 1. Guardar token y datos básicos en la sesión
+        st.session_state['logged_in'] = True
+        st.session_state['token'] = token
+        st.session_state['user_id'] = user_id
+        st.session_state['user'] = auth_data['user']
+        
+        # 2. Consultar el perfil (rol y sucursal) usando el token
+        profile_response = requests.get(
+            f"{POSTGREST_ENDPOINT}/profiles?id=eq.{user_id}&select=*,roles(role_name)", 
+            headers=get_headers(token)
+        )
+        profile_response.raise_for_status()
+
+        profile_data = profile_response.json()
+        
+        if profile_data:
+            profile = profile_data[0]
             
-            # 2. Consultar el perfil del usuario (rol y sucursal)
-            # Hacemos un JOIN implícito para obtener el role_name
-            profile_response = supabase.from_('profiles').select('*, roles(role_name)').eq('id', user_id).execute()
+            # 3. Guardar estado completo en la sesión
+            st.session_state['user_role'] = profile['roles']['role_name']
+            st.session_state['branch_id'] = profile['branch_id']
+            st.session_state['username'] = profile['username']
             
-            if profile_response.data and profile_response.data[0]:
-                profile = profile_response.data[0]
-                
-                # 3. Guardar el estado completo en la sesión de Streamlit
-                st.session_state['logged_in'] = True
-                st.session_state['user'] = response.user
-                st.session_state['user_id'] = user_id
-                st.session_state['user_role'] = profile['roles']['role_name']
-                st.session_state['branch_id'] = profile['branch_id']
-                st.session_state['username'] = profile['username']
-                
-                st.success(f"Bienvenido, {profile['username']} ({profile['roles']['role_name']}).")
-                st.rerun() 
-            else:
-                st.error("Su cuenta no tiene un perfil asignado. Contacte al administrador.")
-                supabase.auth.sign_out() # Forzar logout si existe en Auth pero no en profiles
+            st.success(f"Bienvenido, {profile['username']} ({profile['roles']['role_name']}).")
+            st.rerun() 
         else:
-            st.error("Credenciales inválidas.")
+            st.error("Su cuenta no tiene un perfil asignado. Contacte al administrador.")
+            sign_out() # Forzar logout
             
+    except requests.exceptions.HTTPError as err:
+        if err.response.status_code == 400:
+             st.error("Credenciales inválidas. Revise su email y contraseña.")
+        else:
+            st.error(f"Error de conexión o autenticación: {err}")
     except Exception as e:
-        # Los errores de Supabase suelen ser descriptivos
-        st.error("Credenciales inválidas o error de conexión.")
-        print(f"Error de Supabase: {e}")
+        st.error(f"Error inesperado durante el login: {e}")
+
 
 def sign_out():
-    """Cierra la sesión y limpia el estado de Streamlit."""
-    try:
-        supabase.auth.sign_out()
-        st.session_state.clear()
-        st.session_state['logged_in'] = False # Asegurar que el flag de sesión quede en False
-        st.rerun()
-    except Exception as e:
-        st.error("Error al cerrar sesión.")
-        print(f"Error de Supabase: {e}")
+    """Cierra la sesión limpiando el estado (no requiere llamada a la API en este modelo)."""
+    st.session_state.clear()
+    st.session_state['logged_in'] = False
+    st.rerun()
 
-def get_current_user():
-    """Retorna el objeto de usuario de la sesión."""
-    return st.session_state.get('user', None)
-
-def is_authenticated():
-    """Verifica si hay un usuario autenticado."""
-    return st.session_state.get('logged_in', False)
-
-def get_user_role():
-    """Retorna el rol del usuario actual."""
-    return st.session_state.get('user_role', None)
-
-def login_ui():
-    """Muestra el formulario de login en la barra lateral de Streamlit."""
-    with st.sidebar:
-        st.subheader("Acceso al Sistema")
-        email = st.text_input("Correo Electrónico")
-        password = st.text_input("Contraseña", type="password")
-        
-        if st.button("Iniciar Sesión", type="primary"):
-            if email and password:
-                sign_in(email, password)
-            else:
-                st.warning("Ingrese correo y contraseña.")
+# (El resto de las funciones de auth.py quedan igual)
+# get_current_user, is_authenticated, get_user_role, login_ui
