@@ -1,22 +1,28 @@
-# user_service.py
-from db_config import get_supabase_client
+# user_service.py (ACTUALIZADO)
+import requests # NUEVO
 import streamlit as st
 import pandas as pd
 import uuid
 import db_service
-
-supabase = get_supabase_client()
+from db_config import AUTH_ENDPOINT, POSTGREST_ENDPOINT, get_headers, SUPABASE_KEY # NUEVO
 
 # --- Funciones de CRUD de Usuarios ---
 
 def get_all_users_with_branches():
     """Obtiene todos los usuarios con sus roles y sucursales asignadas."""
+    
+    # Debe usar el token de la sesión del Admin para la autorización
+    token = st.session_state.get('token')
+    
+    # Consulta: Obtener profiles con join a roles y branches
+    url = f"{POSTGREST_ENDPOINT}/profiles?select=id,username,email,phone_number,roles(role_name),branches(name)"
+    
     try:
-        # Obtenemos profile, role_name, y branch_name
-        response = supabase.from_('profiles').select('*, roles(role_name), branches(name)').execute()
+        response = requests.get(url, headers=get_headers(token))
+        response.raise_for_status()
         
-        # Procesar para aplanar el diccionario
-        data = response.data
+        data = response.json()
+        
         if data:
             df = pd.DataFrame(data)
             # Aplanar los datos de relación
@@ -24,6 +30,7 @@ def get_all_users_with_branches():
             df['branch_name'] = df['branches'].apply(lambda x: x['name'] if isinstance(x, dict) else 'N/A')
             return df[['id', 'username', 'email', 'role_name', 'branch_name', 'phone_number']]
         return pd.DataFrame()
+        
     except Exception as e:
         st.error(f"Error al obtener usuarios: {e}")
         return pd.DataFrame()
@@ -31,50 +38,59 @@ def get_all_users_with_branches():
 
 def create_user_profile(email: str, username: str, role_id: int, branch_id: int = None, phone_number: str = None):
     """
-    Crea un usuario en Supabase Auth y su perfil correspondiente en la tabla 'profiles'.
+    Crea un usuario en Supabase Auth y su perfil correspondiente.
     """
+    token = st.session_state.get('token')
+    if not token:
+        st.error("Se requiere autenticación para esta acción.")
+        return False
+
     try:
-        # Generar una contraseña temporal (debe ser segura)
+        # 1. Generar Contraseña Temporal y Registrar en Auth (sign_up)
         temp_password = str(uuid.uuid4())
+        auth_url = f"{AUTH_ENDPOINT}/signup"
+        auth_payload = {"email": email, "password": temp_password}
         
-        # 1. Registrar usuario en Auth
-        auth_response = supabase.auth.sign_up({
-            "email": email,
-            "password": temp_password,
-        })
+        # Las llamadas a /signup y /token deben usar la clave anónima (sin el token JWT del Admin)
+        auth_response = requests.post(auth_url, headers=get_headers(), json=auth_payload)
+        auth_response.raise_for_status()
         
-        if not auth_response.user:
-            raise Exception("Fallo en la creación de usuario en Auth.")
-            
-        user_id = auth_response.user.id
+        auth_data = auth_response.json()
+        user_id = auth_data['user']['id']
         
-        # 2. Crear el perfil en la tabla 'profiles'
-        data, count = supabase.from_('profiles').insert([
-            {
-                'id': user_id,
-                'email': email,
-                'username': username,
-                'role_id': role_id,
-                'branch_id': branch_id
-            }
-        ]).execute()
+        # 2. Crear el perfil en la tabla 'profiles' (usando el token del Admin)
+        profile_url = f"{POSTGREST_ENDPOINT}/profiles"
+        profile_payload = {
+            'id': user_id,
+            'email': email,
+            'username': username,
+            'role_id': role_id,
+            'branch_id': branch_id
+        }
         
-        if count == 0:
-            # En un sistema real, aquí llamaríamos a una función de Admin para borrar el usuario de Auth
-            # si falla la inserción del perfil.
-            st.error("Error al guardar el perfil. El usuario fue creado, pero está incompleto.")
-            return False
+        profile_response = requests.post(
+            profile_url, 
+            headers=get_headers(token), 
+            json=profile_payload
+        )
+        profile_response.raise_for_status()
 
         st.success(f"Usuario **{username}** ({email}) creado exitosamente.")
         st.info(f"Contraseña temporal generada: **{temp_password}**. El usuario deberá iniciar sesión y cambiarla.")
         return True
 
-    except Exception as e:
-        error_message = str(e)
-        if "Email already registered" in error_message:
+    except requests.exceptions.HTTPError as err:
+        error_data = err.response.json()
+        # Manejar errores de Auth y PostgREST
+        if 'email address is already taken' in str(error_data):
              st.error("Error: Este correo electrónico ya está registrado.")
+        elif 'duplicate key value violates unique constraint' in str(error_data):
+             st.error("Error: Ya existe un perfil con esta información.")
         else:
-            st.error(f"Error al crear usuario: {error_message}")
+            st.error(f"Error al crear usuario: {error_data.get('msg', error_data.get('message', str(err)))}")
+        return False
+    except Exception as e:
+        st.error(f"Error inesperado al crear usuario: {e}")
         return False
 
 # --- Renderización del Módulo (Para mantener el app.py limpio) ---
