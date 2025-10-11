@@ -62,5 +62,27 @@ def sign_out():
     st.session_state['logged_in'] = False
     st.rerun()
 
-# (El resto de las funciones de auth.py quedan igual)
-# get_current_user, is_authenticated, get_user_role, login_ui
+def get_current_user():
+    """Retorna el objeto de usuario de la sesión."""
+    return st.session_state.get('user', None)
+
+def is_authenticated():
+    """Verifica si hay un usuario autenticado."""
+    return st.session_state.get('logged_in', False)
+
+def get_user_role():
+    """Retorna el rol del usuario actual."""
+    return st.session_state.get('user_role', None)
+
+def login_ui():
+    """Muestra el formulario de login en la barra lateral de Streamlit."""
+    with st.sidebar:
+        st.subheader("Acceso al Sistema")
+        email = st.text_input("Correo Electrónico")
+        password = st.text_input("Contraseña", type="password")
+        
+        if st.button("Iniciar Sesión", type="primary"):
+            if email and password:
+                sign_in(email, password)
+            else:
+                st.warning("Ingrese correo y contraseña.")
