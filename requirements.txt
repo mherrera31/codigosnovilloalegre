@@ -5,3 +5,4 @@ pandas
 pyzbar
 opencv-python-headless
 fpdf2
+supabase-py
