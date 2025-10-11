@@ -5,4 +5,6 @@ pandas
 pyzbar
 opencv-python-headless
 fpdf2
-supabase-py
+postgrest-py
+storage-py
+gotrue-py
