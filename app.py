@@ -1,11 +1,11 @@
-# app.py (INICIO CORREGIDO Y LISTO PARA EJECUTARSE)
+# app.py (VERSIÓN CONSOLIDADA Y CORREGIDA PARA EL DESPLIEGUE)
 import streamlit as st
 import auth 
 import db_service
 import user_service
-import requests # Necesario para db_service y auth
+import requests # Cliente HTTP para interactuar con la API de Supabase
 
-# --- Imports para la funcionalidad de QR/PDF (del app.py original) ---
+# --- Imports para la funcionalidad de QR/PDF ---
 import qrcode 
 from PIL import Image, ImageDraw, ImageFont 
 import uuid
@@ -14,10 +14,16 @@ from datetime import datetime, timedelta
 import pandas as pd
 from pyzbar.pyzbar import decode
 from fpdf import FPDF 
-from db_config import get_headers
+from db_config import get_headers # Solo necesitamos get_headers de db_config
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(page_title="Sistema de QR Novillo Alegre", layout="wide")
+
+
+# ----------------------------------------
+# FUNCIONES AUXILIARES (QR y PDF)
+# NOTA: Estas funciones fueron consolidadas aquí. En un paso posterior, deben ir a qr_utils.py
+# ----------------------------------------
 
 def create_qr_card(data_to_encode: str, output_path: str, description: str, expiration: str):
     """Genera una imagen de tarjeta con el QR, optimizada para tamaño de presentación."""
@@ -68,7 +74,9 @@ def generate_pdf_from_images(image_paths, output_filename):
     pdf.output(output_filename)
     return output_filename
 
-# --- FIN DE LAS FUNCIONES QR/PDF ---
+# ----------------------------------------
+# LÓGICA DE INICIALIZACIÓN Y CONTROL DE ACCESO
+# ----------------------------------------
 
 # Inicializa el estado de la sesión
 if 'logged_in' not in st.session_state:
@@ -77,12 +85,9 @@ if 'user_role' not in st.session_state:
     st.session_state['user_role'] = None
 if 'branch_id' not in st.session_state:
     st.session_state['branch_id'] = None
-# Agregamos la inicialización del cliente Supabase para cachearlo
-get_supabase_client()
-
 
 # ----------------------------------------
-# LÓGICA DE CONTROL DE ACCESO (LOGIN GATE)
+# LOGIN GATE
 # ----------------------------------------
 
 if not auth.is_authenticated():
@@ -148,78 +153,21 @@ elif app_mode == "🔑 Gestión de Usuarios (Admin)":
 elif app_mode == "⚙️ Configuración (Admin)":
     db_service.render_config_management()
     
-# --- MÓDULOS PENDIENTES DE REFACTORIZAR (Por ahora, son el código original) ---
-
-# Nota: El código restante (Creador, Escáner, Reportes) DEBE ser refactorizado
-# para usar las funciones de Supabase de db_service en lugar de sqlite3.
+# --- MÓDULOS PENDIENTES DE REFACTORIZAR (Módulos de Negocio Central) ---
 
 elif app_mode == "🛠️ Creador de QRs":
     # Lógica del creador de QRs pendiente de migrar a Supabase
-    st.warning("Módulo pendiente de migración a Supabase.")
-    # Colocar aquí el código del creador de QRs del app.py original (con adaptación de DB)
+    st.warning("Módulo pendiente de migración de SQLite a Supabase.")
+    st.info("Para que este módulo funcione, debe: 1. Crear la tabla BATCHES. 2. Migrar la lógica de creación de códigos del app.py original para usar db_service.py.")
+
 
 elif app_mode == "📲 Escáner (Cajero)":
     # Lógica del escáner pendiente de migrar a Supabase
-    st.warning("Módulo pendiente de migración a Supabase.")
-    # Colocar aquí el código del escáner de app.py original (con adaptación de DB)
+    st.warning("Módulo pendiente de migración de SQLite a Supabase.")
+    st.info("Para que este módulo funcione, debe: 1. Migrar la lógica de validación y canje del app.py original para usar db_service.py.")
+
 
 elif app_mode == "📊 Reportes (Admin)":
     # Lógica de reportes pendiente de migrar a Supabase
-    st.warning("Módulo pendiente de migración a Supabase.")
-    # Colocar aquí el código de reportes de app.py original (con adaptación de DB)
-
-# ----------------------------------------
-# FUNCIONES AUXILIARES (QR y PDF)
-# ----------------------------------------
-
-def create_qr_card(data_to_encode: str, output_path: str, description: str, expiration: str):
-    """Genera una imagen de tarjeta con el QR, optimizada para tamaño de presentación."""
-    
-    # Asegúrate de que la carpeta de salida exista
-    if not os.path.exists('generated_qrs'):
-        os.makedirs('generated_qrs')
-        
-    card_width, card_height = 875, 500 
-    bg_color, text_color = (255, 255, 255), (0, 0, 0)
-    accent_color = (191, 2, 2) 
-
-    qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=8, border=2)
-    qr.add_data(data_to_encode)
-    qr.make(fit=True)
-    qr_img = qr.make_image(fill_color="black", back_color="white").convert('RGB')
-    
-    card_img = Image.new('RGB', (card_width, card_height), bg_color)
-    draw = ImageDraw.Draw(card_img)
-
-    draw.rectangle([0, 0, card_width, 80], fill=accent_color)
-    try:
-        title_font = ImageFont.truetype("arialbd.ttf", size=32)
-        main_font = ImageFont.truetype("arial.ttf", size=30)
-    except IOError:
-        title_font = main_font = ImageFont.load_default()
-        
-    draw.text((30, 25), "TARJETA DE REGALO NOVILLO ALEGRE", fill=(255,255,255), font=title_font)
-        
-    # Pegar QR
-    qr_scaled = qr_img.resize((card_height - 100, card_height - 100))
-    card_img.paste(qr_scaled, (card_width - qr_scaled.width - 50, 100))
-    
-    draw.text((50, 150), description, fill=text_color, font=main_font)
-    draw.text((50, 220), f"Válido hasta: {expiration}", fill=(100, 100, 100), font=main_font)
-
-    card_img.save(output_path)
-    return output_path
-
-def generate_pdf_from_images(image_paths, output_filename):
-    """Crea un PDF a partir de una lista de imágenes, cada una en una página tamaño tarjeta."""
-    CARD_WIDTH_MM = 85.6
-    CARD_HEIGHT_MM = 53.98
-    pdf = FPDF(orientation='L', unit='mm', format=(CARD_WIDTH_MM, CARD_HEIGHT_MM))
-    
-    for image_path in image_paths:
-        pdf.add_page()
-        pdf.image(image_path, x=0, y=0, w=CARD_WIDTH_MM, h=CARD_HEIGHT_MM) 
-        
-    pdf.output(output_filename)
-    return output_filename
-
+    st.warning("Módulo pendiente de migración de SQLite a Supabase.")
+    st.info("Para que este módulo funcione, debe: 1. Migrar la lógica de consultas de reportes del app.py original para usar db_service.py.")
