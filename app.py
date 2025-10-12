@@ -92,8 +92,11 @@ if 'branch_id' not in st.session_state:
 
 if not auth.is_authenticated():
     # PÁGINA DE LOGIN
-    st.image("https://novilloalegre.com.pa/wp-content/uploads/2020/07/logo-novillo-alegre-panama-restaurante-parrillada-argentina.png", width=300)
-    st.title("Sistema de QRs de Regalo - Acceso Restringido")
+    LOGO_URL = "https://placehold.co/300x100/1E3260/FFFFFF/png?text=Novillo+Alegre+QR" # URL genérica estable
+
+# En el LOGIN GATE:
+    st.image(LOGO_URL, width=300) 
+    st.title("QR-CReator (Inicie Sesion)")
     auth.login_ui()
     st.stop()
     
@@ -102,8 +105,8 @@ if not auth.is_authenticated():
 # ----------------------------------------
 
 # Mostrar Logo en la página principal y título
-st.image("https://novilloalegre.com.pa/wp-content/uploads/2020/07/logo-novillo-alegre-panama-restaurante-parrillada-argentina.png", width=300)
-st.title("Sistema de QRs de Regalo")
+st.image(LOGO_URL, width=300) 
+st.title("QR-Creator")
 
 # Información del usuario en la barra lateral
 user = auth.get_current_user()
