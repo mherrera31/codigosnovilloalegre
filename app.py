@@ -157,75 +157,115 @@ elif app_mode == "⚙️ Configuración (Admin)":
     
 # --- MÓDULOS PENDIENTES DE REFACTORIZAR (Módulos de Negocio Central) ---
 
-if app_mode == "🛠️ Creador de QRs":
-    st.header("Módulo de Creación de Tarjetas QR")
+elif app_mode == "🛠️ Creador de QRs":
     
-    with st.form("qr_creator_form"):
-        st.subheader("Configuración de la Tarjeta")
-        col1, col2 = st.columns(2)
-        with col1:
-            description = st.text_input("Descripción (ej: 20% Descuento Bebidas)", "Corte de Carne de Regalo")
-            value = st.text_input("Valor de referencia (ej: 20%, 5.00)", "25.00")
-            category = st.selectbox("Categoría", ["Cortes", "Bebidas", "Postres", "Todo"])
-        with col2:
-            valid_days = st.number_input("Días de vigencia", min_value=1, max_value=365, value=30)
-            conn = get_db_connection()
-            branches = conn.execute("SELECT * FROM branches").fetchall()
-            conn.close()
-            allowed_branches = st.multiselect("Sucursales permitidas (dejar en blanco para todas)", options=[branch['name'] for branch in branches])
-            count = st.number_input("Cantidad de tarjetas a generar (lote)", min_value=1, max_value=100, value=1)
-        submitted = st.form_submit_button("🚀 Generar Tarjetas", type="primary")
+    # Obtener datos maestros (Solo se ejecuta si el usuario es Admin/Creator)
+    promos = db_service.get_promos()
+    branches = db_service.get_branches()
+    issuers = db_service.get_issuers()
 
-    if submitted:
-        batch_id = f"batch_{uuid.uuid4().hex[:6]}"
-        st.success(f"Generando {count} tarjeta(s) en el lote '{batch_id}'...")
+    promo_options = {p['type_name']: p for p in promos}
+    branch_options = [b['name'] for b in branches]
+    issuer_options = {i['issuer_name']: i['id'] for i in issuers}
+    
+    # --- Interfaz de Pestañas ---
+    tab_creator, tab_template = st.tabs(["Generador de Lote", "Descarga de Plantilla"])
+
+    with tab_creator:
+        st.header("Módulo de Creación de Tarjetas QR")
         
-        generated_image_paths = [] # Lista para guardar las rutas de las imágenes
-        progress_bar = st.progress(0)
+        with st.form("qr_creator_form"):
+            st.subheader("Configuración de la Tarjeta")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                selected_promo_name = st.selectbox("Seleccionar Promoción/Diseño", options=list(promo_options.keys()))
+                selected_promo = promo_options.get(selected_promo_name)
+                
+                # Campos de valor pre-llenados (requiere que la tabla 'promos' tenga estos campos)
+                st.caption(f"Descripción: {selected_promo['description']}")
+                value_crc = st.number_input("Valor de Referencia (Colones)", value=selected_promo['value'], min_value=0.0, format="%.2f")
+                value_usd = st.number_input("Valor de Referencia (Dólares)", value=round(selected_promo['value'] / 590, 2), min_value=0.0, format="%.2f") # Tasa de cambio simulada
+            
+            with col2:
+                valid_days = st.number_input("Días de vigencia", min_value=1, max_value=365, value=30)
+                allowed_branches = st.multiselect("Sucursales permitidas (dejar vacío para todas)", options=branch_options)
+                selected_issuer_name = st.selectbox("Emisor/Campaña", options=list(issuer_options.keys()))
+                count = st.number_input("Cantidad de tarjetas a generar (lote)", min_value=1, max_value=100, value=1)
+                
+            submitted = st.form_submit_button("🚀 Generar Tarjetas", type="primary")
 
-        for i in range(count):
-            unique_id = str(uuid.uuid4())
-            expiration_date = datetime.now() + timedelta(days=valid_days)
+        if submitted:
+            issuer_id = issuer_options.get(selected_issuer_name)
+            user_id = st.session_state.get('user_id')
             
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            cursor.execute(
-                """INSERT INTO qr_codes (uuid, description, value, category, expiration_date, batch_id, created_by)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (unique_id, description, value, category, expiration_date.date(), batch_id, 1) # Creado por user 1 (admin) de ejemplo
-            )
-            qr_id = cursor.lastrowid
-            # Aquí iría la lógica para insertar las sucursales permitidas si es necesario
-            conn.commit()
-            conn.close()
-            
-            output_path = os.path.join('generated_qrs', f"{unique_id}.png")
-            create_qr_card(unique_id, output_path, description, expiration_date.strftime("%Y-%m-%d"))
-            generated_image_paths.append(output_path)
+            if not selected_promo or not issuer_id or not user_id:
+                st.error("Faltan datos de configuración (Promoción o Emisor).")
+            else:
+                st.success(f"Generando {count} tarjeta(s)...")
+                
+                # LLAMADA A LA FUNCIÓN MIGRADA DE SUPABASE
+                coupon_entries = db_service.create_coupon_batch(
+                    count=count,
+                    description=selected_promo['description'],
+                    promo_id=selected_promo['id'],
+                    value_crc=value_crc,
+                    value_usd=value_usd,
+                    issuer_id=issuer_id,
+                    valid_days=valid_days,
+                    branch_names=allowed_branches, # Se convierte a IDs dentro del servicio
+                    user_id=user_id,
+                    batch_name_prefix=selected_promo_name
+                )
+                
+                if coupon_entries:
+                    st.balloons()
+                    generated_image_paths = []
+                    
+                    # Generar imágenes y preparar el PDF
+                    for entry in coupon_entries:
+                        unique_id = entry['id']
+                        consecutive = str(entry['consecutive']).zfill(4) # Formato 0001
+                        expiration = entry['expiration_date']
+                        
+                        output_path = os.path.join('generated_qrs', f"{unique_id}.png")
+                        
+                        # Usar la función de creación de tarjeta (que será modificada en Tarea D)
+                        create_qr_card(unique_id, output_path, selected_promo['description'], expiration, consecutive)
+                        generated_image_paths.append(output_path)
+                        
+                        # ... (Mostrar tarjetas individuales con botón de descarga si es necesario)
+                        
+                    # Sección de Descarga de Lote PDF
+                    st.subheader("⬇️ Descargar Lote Completo")
+                    pdf_path = generate_pdf_from_images(generated_image_paths, f"lote_tarjetas_{coupon_entries[0]['batch_id']}.pdf")
 
-            # Mostrar la tarjeta individual con su botón de descarga
-            with st.expander(f"✅ Tarjeta generada: {unique_id[:8]}..."):
-                st.image(output_path)
-                with open(output_path, "rb") as file:
-                    st.download_button(label="Descargar esta imagen", data=file, file_name=f"tarjeta_{unique_id[:8]}.png", mime="image/png")
-            
-            progress_bar.progress((i + 1) / count)
+                    with open(pdf_path, "rb") as pdf_file:
+                        st.download_button(
+                            label="Descargar PDF con todas las tarjetas",
+                            data=pdf_file,
+                            file_name=os.path.basename(pdf_path),
+                            mime="application/pdf"
+                        )
+
+    # ----------------------------------------
+    # Tarea D: Tab de Plantillas de Diseño
+    # ----------------------------------------
+    with tab_template:
+        st.header("Descarga de Plantilla para Diseño de Arte (9x5 cm)")
+        st.markdown("Use esta plantilla PDF con un cuadro blanco vacío de 2.5x2.5 cm para que su diseñador deje el espacio del QR y el consecutivo.")
         
-        st.balloons()
-
-        # --- SECCIÓN DE GENERACIÓN DE PDF ---
-        st.subheader("⬇️ Descargar Lote Completo")
-        st.info("Todas las tarjetas generadas se han compilado en un solo archivo PDF para facilitar la impresión.")
-
-        pdf_path = generate_pdf_from_images(generated_image_paths, f"lote_tarjetas_{batch_id}.pdf")
-
-        with open(pdf_path, "rb") as pdf_file:
-            st.download_button(
-                label="Descargar PDF con todas las tarjetas",
-                data=pdf_file,
-                file_name=os.path.basename(pdf_path),
-                mime="application/pdf"
-            )
+        # Generamos un PDF con solo el espacio en blanco
+        BLANK_PDF_PATH = "plantilla_diseno_qr.pdf"
+        if st.button("Descargar Plantilla PDF (9x5 cm)"):
+            generate_design_template(BLANK_PDF_PATH)
+            with open(BLANK_PDF_PATH, "rb") as pdf_file:
+                st.download_button(
+                    label="Descargar Plantilla (PDF)",
+                    data=pdf_file,
+                    file_name=BLANK_PDF_PATH,
+                    mime="application/pdf"
+                )
 
 
 elif app_mode == "📲 Escáner (Cajero)":
