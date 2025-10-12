@@ -360,3 +360,82 @@ def render_config_management():
                                 if delete_entry('promos', promo['id']):
                                     st.success("Promoción eliminada.")
                                     st.rerun()
+
+def get_next_consecutive():
+    """Obtiene el último consecutivo usado para los cupones y retorna el siguiente."""
+    token = st.session_state.get('token')
+    
+    # 1. Obtener el último consecutivo usado en la tabla COUPONS
+    url = f"{POSTGREST_ENDPOINT}/coupons?select=consecutive&order=consecutive.desc&limit=1"
+    
+    try:
+        response = requests.get(url, headers=get_headers(token))
+        response.raise_for_status()
+        data = response.json()
+        
+        last_consecutive = data[0]['consecutive'] if data else 0
+        return last_consecutive + 1
+    except Exception as e:
+        st.error(f"Error al obtener consecutivo. Asegure que la tabla 'coupons' exista. Error: {e}")
+        return 1 # Fallback al consecutivo 1
+
+def create_coupon_batch(count: int, description: str, promo_id: int, value_crc: float, value_usd: float, issuer_id: int, valid_days: int, branch_names: list, user_id: str, batch_name_prefix: str):
+    """Genera un lote completo de cupones, insertando en BATCHES y COUPONS."""
+    token = st.session_state.get('token')
+    if not token: return False
+
+    try:
+        # 1. Preparar datos maestros
+        branches = get_branches()
+        branch_options = {b['name']: b['id'] for b in branches}
+        allowed_branch_ids = [branch_options[name] for name in branch_names if name in branch_options]
+        
+        start_consecutive = get_next_consecutive()
+        end_consecutive = start_consecutive + count - 1
+        batch_uuid = str(uuid.uuid4())
+        expiration_date = (datetime.now() + timedelta(days=valid_days)).strftime("%Y-%m-%d")
+
+        # 2. Insertar Lote (BATCHES)
+        batch_payload = {
+            'id': batch_uuid,
+            'batch_name': f"{batch_name_prefix}_{datetime.now().strftime('%Y%m%d%H%M%S')}_{batch_uuid[:4]}",
+            'json_qrs': {'count': count, 'promo_description': description}, # Usaremos un JSON simple
+            'consecutive_start': start_consecutive,
+            'consecutive_end': end_consecutive,
+            'branch_ids': allowed_branch_ids,
+            'expiration_date': expiration_date,
+            'issuer_id': issuer_id,
+            'created_by_user_id': user_id
+        }
+        if not create_entry('batches', batch_payload):
+            raise Exception("Fallo al crear el lote (BATCHES).")
+
+        # 3. Preparar e Insertar Cupones (COUPONS)
+        coupon_entries = []
+        for i in range(count):
+            coupon_uuid = str(uuid.uuid4())
+            consecutive = start_consecutive + i
+            coupon_entries.append({
+                'id': coupon_uuid,
+                'batch_id': batch_uuid,
+                'consecutive': consecutive,
+                'promo_type_id': promo_id,
+                'branch_permissions': allowed_branch_ids,
+                'base_value_colones': value_crc,
+                'base_value_dolares': value_usd,
+                'expiration_date': expiration_date
+            })
+        
+        # Insertar todos los cupones en una sola llamada para eficiencia
+        coupon_url = f"{POSTGREST_ENDPOINT}/coupons"
+        coupon_response = requests.post(coupon_url, headers=get_headers(token), data=json.dumps(coupon_entries))
+        coupon_response.raise_for_status()
+
+        return coupon_entries
+
+    except requests.exceptions.HTTPError as err:
+        st.error(f"Error al generar lote: {err.response.json().get('message', str(err))}")
+        return None
+    except Exception as e:
+        st.error(f"Error inesperado en la creación del lote: {e}")
+        return None
