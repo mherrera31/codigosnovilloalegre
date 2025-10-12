@@ -42,9 +42,9 @@ def get_all_users_with_branches():
 
 # --- Funciones de Creación de Usuarios ---
 
-def create_user_profile(email: str, username: str, role_id: int, branch_id: int = None, phone_number: str = None):
+def create_user_profile(email: str, username: str, password: str, role_id: int, branch_id: int = None, phone_number: str = None):
     """
-    Crea un usuario en Supabase Auth y su perfil correspondiente en la tabla 'profiles'.
+    Crea un usuario en Supabase Auth usando la contraseña manual y su perfil correspondiente.
     """
     token = st.session_state.get('token')
     if not token:
@@ -52,12 +52,11 @@ def create_user_profile(email: str, username: str, role_id: int, branch_id: int 
         return False
 
     try:
-        # 1. Generar Contraseña Temporal y Registrar en Auth (sign_up)
-        temp_password = str(uuid.uuid4())
+        # 1. Registrar usuario en Auth con la contraseña proporcionada
         auth_url = f"{AUTH_ENDPOINT}/signup"
-        auth_payload = {"email": email, "password": temp_password}
+        auth_payload = {"email": email, "password": password}
         
-        # Llamada a /signup debe usar la clave anónima (get_headers() sin token)
+        # Esta llamada sigue usando la clave anónima (get_headers())
         auth_response = requests.post(auth_url, headers=get_headers(), json=auth_payload)
         auth_response.raise_for_status()
         
@@ -74,22 +73,19 @@ def create_user_profile(email: str, username: str, role_id: int, branch_id: int 
             'branch_id': branch_id
         }
         
-        # Esta llamada usa el token del Admin (get_headers(token))
         profile_response = requests.post(
             profile_url, 
             headers=get_headers(token), 
-            data=json.dumps(profile_payload) # Usamos data=json.dumps() o json=payload para evitar errores
+            data=json.dumps(profile_payload)
         )
         profile_response.raise_for_status()
 
-        st.success(f"Usuario **{username}** ({email}) creado exitosamente.")
-        st.info(f"Contraseña temporal generada: **{temp_password}**. El usuario deberá iniciar sesión y cambiarla.")
+        st.success(f"Usuario **{username}** ({email}) creado exitosamente con la contraseña proporcionada.")
         return True
 
     except requests.exceptions.HTTPError as err:
+        # ... (mismo manejo de errores)
         error_data = err.response.json()
-        
-        # Manejar errores específicos de la API
         error_msg = error_data.get('msg', error_data.get('message', str(err)))
         if 'email address is already taken' in error_msg:
              st.error("Error: Este correo electrónico ya está registrado.")
