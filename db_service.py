@@ -205,3 +205,38 @@ def render_config_management():
             st.dataframe(df_promos, use_container_width=True)
         else:
             st.info("No hay promociones registradas.")
+
+def update_entry(table_name: str, id_value: any, payload: dict, id_column: str = 'id'):
+    """Función genérica para actualizar una entrada por ID."""
+    token = st.session_state.get('token')
+    if not token:
+        st.error("Se requiere autenticación para esta acción.")
+        return False
+
+    # Sintaxis de PostgREST para actualizar: table?id_column=eq.id_value
+    url = f"{POSTGREST_ENDPOINT}/{table_name}?{id_column}=eq.{id_value}"
+    
+    try:
+        response = requests.patch(url, headers=get_headers(token), data=json.dumps(payload))
+        response.raise_for_status()
+        return True
+    except requests.exceptions.HTTPError as err:
+        st.error(f"Error al actualizar en {table_name}: {err.response.json().get('message', str(err))}")
+        return False
+
+def delete_entry(table_name: str, id_value: any, id_column: str = 'id'):
+    """Función genérica para eliminar una entrada por ID."""
+    token = st.session_state.get('token')
+    if not token:
+        st.error("Se requiere autenticación para esta acción.")
+        return False
+
+    url = f"{POSTGREST_ENDPOINT}/{table_name}?{id_column}=eq.{id_value}"
+    
+    try:
+        response = requests.delete(url, headers=get_headers(token))
+        response.raise_for_status()
+        return True
+    except requests.exceptions.HTTPError as err:
+        st.error(f"Error al eliminar en {table_name}: {err.response.json().get('message', str(err))}")
+        return False
