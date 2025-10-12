@@ -125,6 +125,8 @@ def render_user_management():
             with col1:
                 input_username = st.text_input("Nombre Completo")
                 input_email = st.text_input("Correo Electrónico (será el nombre de usuario)")
+                # NUEVO CAMPO DE CONTRASEÑA
+                input_password = st.text_input("Contraseña Inicial", type="password") 
             with col2:
                 selected_role_name = st.selectbox("Rol", options=list(role_options.keys()))
                 
@@ -144,10 +146,12 @@ def render_user_management():
                 branch_id = branch_options.get(selected_branch_name) if selected_branch_name else None
                 
                 if input_email and input_username and role_id:
-                    if create_user_profile(input_email, input_username, role_id, branch_id):
-                        st.rerun()
-                else:
-                    st.warning("El nombre, correo y rol son obligatorios.")
+                    if input_email and input_username and role_id and input_password: # Validar que la contraseña no esté vacía
+                        # LLAMADA ACTUALIZADA CON CONTRASEÑA
+                        if create_user_profile(input_email, input_username, input_password, role_id, branch_id):
+                            st.rerun()
+                    elif submitted:
+                        st.warning("El nombre, correo, rol y contraseña son obligatorios.")
 
     with tab2:
         st.subheader("Lista de Usuarios del Sistema")
