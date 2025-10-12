@@ -61,7 +61,16 @@ def create_user_profile(email: str, username: str, password: str, role_id: int, 
         auth_response.raise_for_status()
         
         auth_data = auth_response.json()
-        user_id = auth_data['user']['id']
+        user_data = auth_data.get('user', auth_data) 
+        user_id = user_data.get('id')
+        
+        if not user_id:
+            raise Exception("No se pudo obtener el ID del usuario recién creado.")
+
+        # 2. Crear el perfil en la tabla 'profiles' (usando el token del Admin)
+        profile_url = f"{POSTGREST_ENDPOINT}/profiles"
+        profile_payload = {
+            'id': user_id,
         
         # 2. Crear el perfil en la tabla 'profiles' (usando el token del Admin)
         profile_url = f"{POSTGREST_ENDPOINT}/profiles"
