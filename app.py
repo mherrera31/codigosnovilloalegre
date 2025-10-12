@@ -26,6 +26,16 @@ LOGO_URL = "https://placehold.co/300x100/1E3260/FFFFFF/png?text=Novillo+Alegre+Q
 # NOTA: Estas funciones fueron consolidadas aquí. En un paso posterior, deben ir a qr_utils.py
 # ----------------------------------------
 
+# --- CONFIGURACIÓN DE RUTAS ---
+TEMPLATE_DIR = 'design_templates'
+os.makedirs(TEMPLATE_DIR, exist_ok=True)
+TEMPLATE_PATH_KEY = 'current_template_path'
+
+# Inicializa la ruta de la plantilla si no existe
+if TEMPLATE_PATH_KEY not in st.session_state:
+    st.session_state[TEMPLATE_PATH_KEY] = None
+
+
 def create_qr_card(data_to_encode: str, output_path: str, description: str, expiration: str):
     """Genera una imagen de tarjeta con el QR, optimizada para tamaño de presentación."""
     
@@ -169,8 +179,8 @@ elif app_mode == "🛠️ Creador de QRs":
     issuer_options = {i['issuer_name']: i['id'] for i in issuers}
     
     # --- Interfaz de Pestañas ---
-    tab_creator, tab_template = st.tabs(["Generador de Lote", "Descarga de Plantilla"])
-
+    tab_creator, tab_template = st.tabs(["Generador de Lote", "Gestión de Plantilla"])
+    
     with tab_creator:
         st.header("Módulo de Creación de Tarjetas QR")
         
@@ -249,23 +259,54 @@ elif app_mode == "🛠️ Creador de QRs":
                         )
 
     # ----------------------------------------
-    # Tarea D: Tab de Plantillas de Diseño
+    # GESTIÓN Y DESCARGA DE PLANTILLAS DE DISEÑO
     # ----------------------------------------
     with tab_template:
-        st.header("Descarga de Plantilla para Diseño de Arte (9x5 cm)")
-        st.markdown("Use esta plantilla PDF con un cuadro blanco vacío de 2.5x2.5 cm para que su diseñador deje el espacio del QR y el consecutivo.")
+        st.header("Gestión de Plantilla para Arte y Diseño")
         
-        # Generamos un PDF con solo el espacio en blanco
-        BLANK_PDF_PATH = "plantilla_diseno_qr.pdf"
-        if st.button("Descargar Plantilla PDF (9x5 cm)"):
+        # 1. DESCARGA DE LA GUÍA DE ESPACIOS
+        st.subheader("1. Guía de Espacios (Para el Diseñador)")
+        st.markdown("Use esta guía para crear su arte y dejar el espacio libre para el QR y el consecutivo.")
+        
+        BLANK_PDF_PATH = os.path.join(TEMPLATE_DIR, "plantilla_guia_9x5.pdf")
+        if st.button("Descargar Guía PDF (9x5 cm)", key="download_guide"):
             generate_design_template(BLANK_PDF_PATH)
             with open(BLANK_PDF_PATH, "rb") as pdf_file:
                 st.download_button(
-                    label="Descargar Plantilla (PDF)",
+                    label="Descargar Guía de Diseño (PDF)",
                     data=pdf_file,
                     file_name=BLANK_PDF_PATH,
                     mime="application/pdf"
                 )
+    
+        st.markdown("---")
+        
+        # 2. CARGA DE LA PLANTILLA DE ARTE (PDF)
+        st.subheader("2. Subir Plantilla de Arte (PDF Terminado)")
+        
+        uploaded_file = st.file_uploader(
+            "Suba el PDF de Diseño (Arte Terminado, 9x5cm) para usar como fondo", 
+            type="pdf", 
+            key="template_uploader"
+        )
+        
+        if uploaded_file is not None:
+            # Guardar el archivo subido de forma persistente
+            template_filename = "plantilla_arte_activa.pdf"
+            save_path = os.path.join(TEMPLATE_DIR, template_filename)
+            
+            with open(save_path, "wb") as f:
+                f.write(uploaded_file.getbuffer())
+            
+            st.session_state[TEMPLATE_PATH_KEY] = save_path
+            st.success(f"Plantilla de Arte cargada exitosamente: {uploaded_file.name}")
+            
+        # Mostrar el estado actual de la plantilla
+        if st.session_state[TEMPLATE_PATH_KEY]:
+            st.info(f"🎨 **Plantilla Actual:** {os.path.basename(st.session_state[TEMPLATE_PATH_KEY])} (Lista para usar en el Generador de Lote).")
+        else:
+            st.warning("No hay ninguna plantilla de diseño cargada actualmente. Se usará fondo blanco.")
+
 
 
 elif app_mode == "📲 Escáner (Cajero)":
