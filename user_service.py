@@ -157,6 +157,6 @@ def render_user_management():
         st.subheader("Lista de Usuarios del Sistema")
         df_users = get_all_users_with_branches()
         if not df_users.empty:
-            st.dataframe(df_users, use_container_width=True)
+            st.dataframe(df_users, width='stretch')
         else:
             st.info("No hay usuarios registrados o el perfil Admin no tiene permisos.")
