@@ -1,10 +1,12 @@
-# db_service.py (VERSIÓN CORREGIDA Y REORDENADA)
+# db_service.py
 import requests
 import streamlit as st
 import pandas as pd
 import json
-import auth # Importamos auth aquí para usarlo en las funciones de servicio
+import uuid  # <-- ¡CORRECCIÓN FINAL: Importación de UUID para la creación de lotes!
+import auth 
 from db_config import POSTGREST_ENDPOINT, get_headers
+from datetime import datetime, timedelta
 
 
 # =================================================================
@@ -40,6 +42,7 @@ def get_issuers():
 def get_promos():
     """Obtiene la lista de promociones."""
     return get_data_table('promos')
+
 
 # --- CREATE ---
 
@@ -136,12 +139,160 @@ def delete_entry(table_name: str, id_value: any, id_column: str = 'id'):
         return False
 
 # =================================================================
-# 2. RENDERIZACIÓN DE LA INTERFAZ DE CONFIGURACIÓN
+# 2. FUNCIONES DE LOTE Y CUPÓN
 # =================================================================
+
+def get_next_consecutive():
+    """Obtiene el último consecutivo usado para los cupones y retorna el siguiente."""
+    token = st.session_state.get('token')
+    
+    # 1. Obtener el último consecutivo usado en la tabla COUPONS
+    url = f"{POSTGREST_ENDPOINT}/coupons?select=consecutive&order=consecutive.desc&limit=1"
+    
+    try:
+        response = requests.get(url, headers=get_headers(token))
+        response.raise_for_status()
+        data = response.json()
+        
+        last_consecutive = data[0]['consecutive'] if data else 0
+        return last_consecutive + 1
+    except Exception as e:
+        # st.error(f"Error al obtener consecutivo. Asegure que la tabla 'coupons' exista. Error: {e}")
+        return 1 # Fallback al consecutivo 1
+
+def create_coupon_batch(count: int, description: str, promo_id: int, value_crc: float, value_usd: float, issuer_id: int, valid_days: int, branch_names: list, user_id: str, batch_name_prefix: str):
+    """Genera un lote completo de cupones, insertando en BATCHES y COUPONS."""
+    token = st.session_state.get('token')
+    if not token: 
+        st.error("Se requiere autenticación para crear el lote.")
+        return None
+
+    try:
+        # 1. Preparar datos maestros
+        branches = get_branches()
+        branch_options = {b['name']: b['id'] for b in branches}
+        allowed_branch_ids = [branch_options[name] for name in branch_names if name in branch_options]
+        
+        start_consecutive = get_next_consecutive()
+        end_consecutive = start_consecutive + count - 1
+        batch_uuid = str(uuid.uuid4())
+        expiration_date = (datetime.now() + timedelta(days=valid_days)).strftime("%Y-%m-%d")
+
+        # 2. Insertar Lote (BATCHES)
+        batch_payload = {
+            'id': batch_uuid,
+            'batch_name': f"{batch_name_prefix}_{datetime.now().strftime('%Y%m%d%H%M%S')}_{batch_uuid[:4]}",
+            'json_qrs': {'count': count, 'promo_description': description},
+            'consecutive_start': start_consecutive,
+            'consecutive_end': end_consecutive,
+            'branch_ids': allowed_branch_ids,
+            'expiration_date': expiration_date,
+            'issuer_id': issuer_id,
+            'created_by_user_id': user_id
+        }
+        if not create_entry('batches', batch_payload):
+            raise Exception("Fallo al crear el lote (BATCHES).")
+
+        # 3. Preparar e Insertar Cupones (COUPONS)
+        coupon_entries = []
+        for i in range(count):
+            coupon_uuid = str(uuid.uuid4())
+            consecutive = start_consecutive + i
+            coupon_entries.append({
+                'id': coupon_uuid,
+                'batch_id': batch_uuid,
+                'consecutive': consecutive,
+                'promo_type_id': promo_id,
+                'branch_permissions': allowed_branch_ids,
+                'base_value_colones': value_crc,
+                'base_value_dolares': value_usd,
+                'expiration_date': expiration_date
+            })
+        
+        coupon_url = f"{POSTGREST_ENDPOINT}/coupons"
+        coupon_response = requests.post(coupon_url, headers=get_headers(token), data=json.dumps(coupon_entries))
+        coupon_response.raise_for_status()
+
+        return coupon_entries
+
+    except requests.exceptions.HTTPError as err:
+        st.error(f"Error al generar lote: {err.response.json().get('message', str(err))}")
+        return None
+    except Exception as e:
+        st.error(f"Error inesperado en la creación del lote: {e}")
+        return None
+
+
+# =================================================================
+# 3. FUNCIONES DE REPORTES
+# =================================================================
+
+def get_activity_report(filters: str):
+    """Obtiene el reporte de actividad de cupones con joins para mostrar en la tabla."""
+    token = st.session_state.get('token')
+    
+    # Sintaxis de SELECT corregida para evitar errores 400 y de relación.
+    select_params = (
+        "id,consecutive,is_redeemed,redemption_date,invoice_number,creation_date,"
+        "batch_id(issuer:issuers(issuer_name)),"
+        "redemption_branch_id(name),"
+        "redeemed_by_user_id(username)"
+    )
+    
+    select_params = select_params.replace(' ', '')
+
+    url = f"{POSTGREST_ENDPOINT}/coupons?select={select_params}"
+
+    all_params = []
+    if filters:
+        all_params.append(filters)
+        
+    all_params.append("order=creation_date.desc")
+
+    url_final = url + "&" + "&".join(all_params)
+
+    try:
+        response = requests.get(url_final, headers=get_headers(token))
+        response.raise_for_status()
+        data = response.json()
+        
+        if data:
+            df = pd.DataFrame(data)
+            
+            # Aplanamiento de datos
+            df['Redemption Branch'] = df['redemption_branch_id'].apply(lambda x: x['name'] if x else 'N/A')
+            df['Redeemed By'] = df['redeemed_by_user_id'].apply(lambda x: x['username'] if x else 'N/A')
+            df['Issuer'] = df['batch_id'].apply(lambda x: x['issuer']['issuer_name'] if x and x['issuer'] else 'N/A')
+            
+            df['is_redeemed'] = df['is_redeemed'].astype(bool)
+
+            return df[['id', 'consecutive', 'is_redeemed', 'redemption_date', 'invoice_number', 'Redemption Branch', 'Redeemed By', 'Issuer']]
+        
+        return pd.DataFrame()
+        
+    except requests.exceptions.HTTPError as e:
+        # Registra el error pero devuelve DataFrame vacío para evitar NameError en app.py
+        # st.error(f"Error al cargar el reporte: {e.response.json().get('message', str(e))}")
+        return pd.DataFrame()
+    except Exception as e:
+        # st.error(f"Error inesperado al cargar el reporte: {e}")
+        return pd.DataFrame()
+        
+
+# =================================================================
+# 4. RENDERIZACIÓN DE LA INTERFAZ DE CONFIGURACIÓN (CRUD)
+# =================================================================
+
+# La función render_config_management debe estar al final del archivo.
+# Nota: La tuve que mover de mi respuesta anterior porque me lo solicitaste en partes.
 
 def render_config_management():
     """Módulo de Streamlit para la gestión de datos maestros (Solo Admin)."""
-    
+    import streamlit as st
+    import pandas as pd
+    import auth # Necesario para chequear el rol
+    # Nota: Las funciones update_entry y delete_entry están disponibles globalmente.
+
     # Control de acceso por rol
     if auth.get_user_role() != 'Admin':
         st.error("Acceso denegado. Solo los administradores pueden configurar.")
@@ -152,7 +303,7 @@ def render_config_management():
     tab_branch, tab_issuer, tab_promo = st.tabs(["Sucursales", "Emisores", "Promociones"])
 
     # ------------------
-    # TABLA SUCURSALES
+    # TABLA SUCURSALES (CRUD)
     # ------------------
     with tab_branch:
         st.subheader("Administrar Sucursales")
@@ -205,7 +356,6 @@ def render_config_management():
                                 st.rerun()
                                 
                         if delete_button:
-                            # Confirmación simple antes de eliminar
                             st.error("Si elimina, es irreversible.") 
                             if st.button("Confirmar Eliminación", key=f"confirm_del_b{branch['id']}"):
                                 if delete_entry('branches', branch['id']):
@@ -216,7 +366,7 @@ def render_config_management():
             st.info("No hay sucursales para editar.")
 
     # ------------------
-    # TABLA EMISORES
+    # TABLA EMISORES (CRUD)
     # ------------------
     with tab_issuer:
         st.subheader("Administrar Emisores")
@@ -273,7 +423,7 @@ def render_config_management():
 
 
     # ------------------
-    # TABLA PROMOCIONES (PROMOS)
+    # TABLA PROMOCIONES (CRUD)
     # ------------------
     with tab_promo:
         st.subheader("Administrar Tipos de Promoción/Descuento")
@@ -315,6 +465,11 @@ def render_config_management():
         
         if promos_data:
             for promo in promos_data:
+                # Determinar el tipo de valor actual para el radio button
+                current_type = ("Porcentaje" if promo['is_percentage'] else 
+                                "Valor Fijo" if promo['is_cash_value'] else 
+                                "Producto de Regalo")
+                
                 with st.expander(f"Promo ID {promo['id']} - {promo['type_name']}"):
                     with st.form(f"edit_promo_{promo['id']}"):
                         
@@ -324,10 +479,6 @@ def render_config_management():
                             e_desc = st.text_area("Descripción", value=promo['description'], key=f"p_desc_{promo['id']}")
                             e_value = st.number_input("Valor Numérico", value=promo['value'], min_value=0.0, format="%.2f", key=f"p_val_{promo['id']}")
                         with col_e2:
-                            # Recrear el radio para seleccionar el tipo actual
-                            current_type = ("Porcentaje" if promo['is_percentage'] else 
-                                            "Valor Fijo" if promo['is_cash_value'] else 
-                                            "Producto de Regalo")
                             e_type = st.radio("Tipo de Valor", ["Porcentaje", "Valor Fijo", "Producto de Regalo"], index=["Porcentaje", "Valor Fijo", "Producto de Regalo"].index(current_type), key=f"p_type_{promo['id']}")
                             
                             e_is_p = e_type == "Porcentaje"
@@ -360,146 +511,3 @@ def render_config_management():
                                 if delete_entry('promos', promo['id']):
                                     st.success("Promoción eliminada.")
                                     st.rerun()
-
-def get_next_consecutive():
-    """Obtiene el último consecutivo usado para los cupones y retorna el siguiente."""
-    token = st.session_state.get('token')
-    
-    # 1. Obtener el último consecutivo usado en la tabla COUPONS
-    url = f"{POSTGREST_ENDPOINT}/coupons?select=consecutive&order=consecutive.desc&limit=1"
-    
-    try:
-        response = requests.get(url, headers=get_headers(token))
-        response.raise_for_status()
-        data = response.json()
-        
-        last_consecutive = data[0]['consecutive'] if data else 0
-        return last_consecutive + 1
-    except Exception as e:
-        st.error(f"Error al obtener consecutivo. Asegure que la tabla 'coupons' exista. Error: {e}")
-        return 1 # Fallback al consecutivo 1
-
-def create_coupon_batch(count: int, description: str, promo_id: int, value_crc: float, value_usd: float, issuer_id: int, valid_days: int, branch_names: list, user_id: str, batch_name_prefix: str):
-    """Genera un lote completo de cupones, insertando en BATCHES y COUPONS."""
-    token = st.session_state.get('token')
-    if not token: return False
-
-    try:
-        # 1. Preparar datos maestros
-        branches = get_branches()
-        branch_options = {b['name']: b['id'] for b in branches}
-        allowed_branch_ids = [branch_options[name] for name in branch_names if name in branch_options]
-        
-        start_consecutive = get_next_consecutive()
-        end_consecutive = start_consecutive + count - 1
-        batch_uuid = str(uuid.uuid4())
-        expiration_date = (datetime.now() + timedelta(days=valid_days)).strftime("%Y-%m-%d")
-
-        # 2. Insertar Lote (BATCHES)
-        batch_payload = {
-            'id': batch_uuid,
-            'batch_name': f"{batch_name_prefix}_{datetime.now().strftime('%Y%m%d%H%M%S')}_{batch_uuid[:4]}",
-            'json_qrs': {'count': count, 'promo_description': description}, # Usaremos un JSON simple
-            'consecutive_start': start_consecutive,
-            'consecutive_end': end_consecutive,
-            'branch_ids': allowed_branch_ids,
-            'expiration_date': expiration_date,
-            'issuer_id': issuer_id,
-            'created_by_user_id': user_id
-        }
-        if not create_entry('batches', batch_payload):
-            raise Exception("Fallo al crear el lote (BATCHES).")
-
-        # 3. Preparar e Insertar Cupones (COUPONS)
-        coupon_entries = []
-        for i in range(count):
-            coupon_uuid = str(uuid.uuid4())
-            consecutive = start_consecutive + i
-            coupon_entries.append({
-                'id': coupon_uuid,
-                'batch_id': batch_uuid,
-                'consecutive': consecutive,
-                'promo_type_id': promo_id,
-                'branch_permissions': allowed_branch_ids,
-                'base_value_colones': value_crc,
-                'base_value_dolares': value_usd,
-                'expiration_date': expiration_date
-            })
-        
-        # Insertar todos los cupones en una sola llamada para eficiencia
-        coupon_url = f"{POSTGREST_ENDPOINT}/coupons"
-        coupon_response = requests.post(coupon_url, headers=get_headers(token), data=json.dumps(coupon_entries))
-        coupon_response.raise_for_status()
-
-        return coupon_entries
-
-    except requests.exceptions.HTTPError as err:
-        st.error(f"Error al generar lote: {err.response.json().get('message', str(err))}")
-        return None
-    except Exception as e:
-        st.error(f"Error inesperado en la creación del lote: {e}")
-        return None
-
-def get_activity_report(filters: str):
-    """Obtiene el reporte de actividad de cupones con joins para mostrar en la tabla."""
-    token = st.session_state.get('token')
-    
-    # 1. DEFINICIÓN DEL SELECT USANDO LA SINTAXIS EXPLÍCITA Y CORREGIDA
-    select_params = (
-        "id,consecutive,is_redeemed,redemption_date,invoice_number,creation_date,"
-        
-        # JOIN al emisor (a través de la tabla batches)
-        # Nota: PostgREST usa el nombre de la FK (batch_id) o la relación (batches)
-        "batch_id(issuer_id(issuer_name))," # Usamos la columna FK batch_id(FK_COL_ID(COL))
-        
-        # CORRECCIÓN CLAVE: Usamos el nombre de la columna + tabla de destino
-        # La convención más robusta de PostgREST es usar la FK como si fuera la relación
-        "redemption_branch_id:branches(name)," 
-        
-        # JOIN al usuario canjeador (redeemed_by_user_id)
-        "redeemed_by_user_id:profiles(username)"
-    )
-    
-    # Eliminar espacios para evitar el error 400 (Bad Request)
-    select_params = select_params.replace(' ', '')
-
-    # 2. Construcción de la URL
-    url = f"{POSTGREST_ENDPOINT}/coupons?select={select_params}"
-
-    # ... (El resto de la construcción de la URL)
-    all_params = []
-    
-    if filters:
-        all_params.append(filters)
-        
-    all_params.append("order=creation_date.desc")
-
-    url_final = url + "&" + "&".join(all_params)
-
-    try:
-        response = requests.get(url_final, headers=get_headers(token))
-        response.raise_for_status()
-        data = response.json()
-        
-        if data:
-            df = pd.DataFrame(data)
-            
-            # Aplanamiento usando los nuevos nombres de columna
-            # Si el join funciona, el nombre del campo en el JSON será 'redemption_branch_id'
-            df['Redemption Branch'] = df['redemption_branch_id'].apply(lambda x: x['name'] if x else 'N/A')
-            df['Redeemed By'] = df['redeemed_by_user_id'].apply(lambda x: x['username'] if x else 'N/A')
-            # El campo del emisor es un join anidado: batch_id -> issuer_id -> issuer_name
-            df['Issuer'] = df['batch_id'].apply(lambda x: x['issuer_id']['issuer_name'] if x and x['issuer_id'] else 'N/A')
-            
-            df['is_redeemed'] = df['is_redeemed'].astype(bool)
-
-            return df[['id', 'consecutive', 'is_redeemed', 'redemption_date', 'invoice_number', 'Redemption Branch', 'Redeemed By', 'Issuer']]
-        
-        return pd.DataFrame()
-        
-    except requests.exceptions.HTTPError as e:
-        st.error(f"Error al cargar el reporte: {e.response.json().get('message', str(e))}")
-        return pd.DataFrame()
-    except Exception as e:
-        st.error(f"Error inesperado al cargar el reporte: {e}")
-        return pd.DataFrame()
