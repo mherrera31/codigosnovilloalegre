@@ -1,20 +1,23 @@
-# user_service.py (ACTUALIZADO)
-import requests # NUEVO
+# user_service.py
+import requests 
 import streamlit as st
 import pandas as pd
 import uuid
-import db_service
-from db_config import AUTH_ENDPOINT, POSTGREST_ENDPOINT, get_headers, SUPABASE_KEY # NUEVO
+import db_service # Necesario para obtener listas de roles/sucursales
+import json
+from db_config import AUTH_ENDPOINT, POSTGREST_ENDPOINT, get_headers, SUPABASE_KEY 
+import auth # Necesario para obtener el token del admin logueado
 
-# --- Funciones de CRUD de Usuarios ---
+# --- Funciones de Lectura y Conversión ---
 
 def get_all_users_with_branches():
-    """Obtiene todos los usuarios con sus roles y sucursales asignadas."""
+    """Obtiene todos los usuarios con sus roles y sucursales asignadas usando PostgREST."""
     
     # Debe usar el token de la sesión del Admin para la autorización
     token = st.session_state.get('token')
     
-    # Consulta: Obtener profiles con join a roles y branches
+    # Consulta: Obtener profile, role_name, y branch_name a través de JOINs
+    # El formato del select permite obtener los campos de las tablas relacionadas
     url = f"{POSTGREST_ENDPOINT}/profiles?select=id,username,email,phone_number,roles(role_name),branches(name)"
     
     try:
@@ -25,20 +28,23 @@ def get_all_users_with_branches():
         
         if data:
             df = pd.DataFrame(data)
-            # Aplanar los datos de relación
-            df['role_name'] = df['roles'].apply(lambda x: x['role_name'] if isinstance(x, dict) else None)
-            df['branch_name'] = df['branches'].apply(lambda x: x['name'] if isinstance(x, dict) else 'N/A')
+            # Aplanar los datos de relación (porque Supabase devuelve objetos anidados)
+            df['role_name'] = df['roles'].apply(lambda x: x['role_name'] if isinstance(x, dict) and x else None)
+            df['branch_name'] = df['branches'].apply(lambda x: x['name'] if isinstance(x, dict) and x else 'N/A')
             return df[['id', 'username', 'email', 'role_name', 'branch_name', 'phone_number']]
         return pd.DataFrame()
         
     except Exception as e:
-        st.error(f"Error al obtener usuarios: {e}")
+        # En el caso de "No API key found" u otro error
+        st.error(f"Error al obtener usuarios. Asegúrese de tener el perfil Admin configurado. Error: {e}")
         return pd.DataFrame()
 
 
+# --- Funciones de Creación de Usuarios ---
+
 def create_user_profile(email: str, username: str, role_id: int, branch_id: int = None, phone_number: str = None):
     """
-    Crea un usuario en Supabase Auth y su perfil correspondiente.
+    Crea un usuario en Supabase Auth y su perfil correspondiente en la tabla 'profiles'.
     """
     token = st.session_state.get('token')
     if not token:
@@ -51,7 +57,7 @@ def create_user_profile(email: str, username: str, role_id: int, branch_id: int 
         auth_url = f"{AUTH_ENDPOINT}/signup"
         auth_payload = {"email": email, "password": temp_password}
         
-        # Las llamadas a /signup y /token deben usar la clave anónima (sin el token JWT del Admin)
+        # Llamada a /signup debe usar la clave anónima (get_headers() sin token)
         auth_response = requests.post(auth_url, headers=get_headers(), json=auth_payload)
         auth_response.raise_for_status()
         
@@ -68,10 +74,11 @@ def create_user_profile(email: str, username: str, role_id: int, branch_id: int 
             'branch_id': branch_id
         }
         
+        # Esta llamada usa el token del Admin (get_headers(token))
         profile_response = requests.post(
             profile_url, 
             headers=get_headers(token), 
-            json=profile_payload
+            data=json.dumps(profile_payload) # Usamos data=json.dumps() o json=payload para evitar errores
         )
         profile_response.raise_for_status()
 
@@ -81,31 +88,32 @@ def create_user_profile(email: str, username: str, role_id: int, branch_id: int 
 
     except requests.exceptions.HTTPError as err:
         error_data = err.response.json()
-        # Manejar errores de Auth y PostgREST
-        if 'email address is already taken' in str(error_data):
+        
+        # Manejar errores específicos de la API
+        error_msg = error_data.get('msg', error_data.get('message', str(err)))
+        if 'email address is already taken' in error_msg:
              st.error("Error: Este correo electrónico ya está registrado.")
-        elif 'duplicate key value violates unique constraint' in str(error_data):
-             st.error("Error: Ya existe un perfil con esta información.")
         else:
-            st.error(f"Error al crear usuario: {error_data.get('msg', error_data.get('message', str(err)))}")
+            st.error(f"Error al crear usuario: {error_msg}")
         return False
     except Exception as e:
         st.error(f"Error inesperado al crear usuario: {e}")
         return False
 
-# --- Renderización del Módulo (Para mantener el app.py limpio) ---
+
+# --- Renderización del Módulo de Streamlit ---
 
 def render_user_management():
     """Módulo de Streamlit para la gestión de usuarios (Solo Admin)."""
     
-    # Control de acceso por rol (Doble chequeo)
+    # Control de acceso por rol 
     if auth.get_user_role() != 'Admin':
         st.error("Acceso denegado. Solo los administradores pueden gestionar usuarios.")
         return
 
     st.header("🔑 Módulo de Gestión de Usuarios")
     
-    # Obtener datos maestros para los selectboxes
+    # Obtener datos maestros (usa db_service para obtener roles y branches)
     roles = db_service.get_roles()
     branches = db_service.get_branches()
     
@@ -127,7 +135,11 @@ def render_user_management():
                 # Mostrar selector de sucursal solo para roles de Creator y Cashier
                 selected_branch_name = None
                 if selected_role_name in ["Creator", "Cashier"]:
-                    selected_branch_name = st.selectbox("Sucursal Asignada", options=list(branch_options.keys()))
+                    # Asegurarse de que branches_options no esté vacío
+                    if branch_options:
+                        selected_branch_name = st.selectbox("Sucursal Asignada", options=list(branch_options.keys()))
+                    else:
+                        st.warning("No hay sucursales creadas. ¡Vaya a Configuración!")
                 
             submitted = st.form_submit_button("Crear y Notificar Usuario", type="primary")
 
@@ -136,7 +148,8 @@ def render_user_management():
                 branch_id = branch_options.get(selected_branch_name) if selected_branch_name else None
                 
                 if input_email and input_username and role_id:
-                    create_user_profile(input_email, input_username, role_id, branch_id)
+                    if create_user_profile(input_email, input_username, role_id, branch_id):
+                        st.rerun()
                 else:
                     st.warning("El nombre, correo y rol son obligatorios.")
 
@@ -146,4 +159,4 @@ def render_user_management():
         if not df_users.empty:
             st.dataframe(df_users, use_container_width=True)
         else:
-            st.info("No hay usuarios registrados.")
+            st.info("No hay usuarios registrados o el perfil Admin no tiene permisos.")
