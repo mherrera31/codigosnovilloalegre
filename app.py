@@ -374,7 +374,8 @@ elif app_mode == "📊 Reportes (Admin)":
     if end_date:
         filters.append(f"creation_date=lte.{end_date}")
     
-    ffilter_string = "&".join(filters)
+    # CORRECCIÓN DE LA TIPOGRAFÍA AQUÍ
+    filter_string = "&".join(filters) # <-- Debe ser 'filter_string'
     
     # LLAMADA MIGRADA A SUPABASE
     report_data = db_service.get_activity_report(filter_string) # Obtener el resultado
