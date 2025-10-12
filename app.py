@@ -374,17 +374,26 @@ elif app_mode == "📊 Reportes (Admin)":
     if end_date:
         filters.append(f"creation_date=lte.{end_date}")
     
-    filter_string = "&".join(filters)
+    ffilter_string = "&".join(filters)
     
     # LLAMADA MIGRADA A SUPABASE
-    df = db_service.get_activity_report(filter_string)
+    report_data = db_service.get_activity_report(filter_string) # Obtener el resultado
+    
+    # CORRECCIÓN CLAVE: Asignar df solo si los datos son válidos, sino usar un DF vacío
+    if report_data is not None and not report_data.empty:
+        df = report_data
+    else:
+        # Si hubo un error o los datos están vacíos, inicializar df como un DataFrame vacío
+        df = pd.DataFrame() 
     
     st.subheader("Datos Completos")
     st.dataframe(df, width='stretch')
 
     # Métricas
+    # La lógica de métricas ahora usa el 'df' inicializado arriba y no fallará.
     if not df.empty:
         total_qrs = len(df)
+        # Nota: La columna 'is_redeemed' debe ser numérica (0 o 1) para usar .sum()
         redeemed_qrs = df['is_redeemed'].sum()
         not_redeemed_qrs = total_qrs - redeemed_qrs
     else:
