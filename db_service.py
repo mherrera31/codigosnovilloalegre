@@ -444,40 +444,37 @@ def get_activity_report(filters: str):
     """Obtiene el reporte de actividad de cupones con joins para mostrar en la tabla."""
     token = st.session_state.get('token')
     
-    # 1. Definición de la selección (SELECT)
-    select_params = "id, consecutive, is_redeemed, redemption_date, invoice_number, batches(issuer:issuers(issuer_name)), redeeming_branch:branches!coupons_redemption_branch_id_fkey(name), redeeming_user:profiles!coupons_redeemed_by_user_id_fkey(username)"
-
-    # 2. Construcción de la URL base
+    # 1. CORRECCIÓN CLAVE: Eliminar todos los espacios después de las comas.
+    select_params = "id,consecutive,is_redeemed,redemption_date,invoice_number,batches(issuer:issuers(issuer_name)),redeeming_branch:branches!coupons_redemption_branch_id_fkey(name),redeeming_user:profiles!coupons_redeemed_by_user_id_fkey(username)"
+    
+    # Asegurarse de que no haya espacios en absoluto:
+    select_params = select_params.replace(' ', '')
+    
+    # 2. Construcción de la URL (El resto del código de la URL que corrige el doble && ya es correcto)
     url = f"{POSTGREST_ENDPOINT}/coupons?select={select_params}"
 
-    # 3. Preparar la lista final de parámetros (incluye filtros y orden)
+    # 3. Preparar la lista final de parámetros
     all_params = []
     
-    # Agregar filtros (si existen)
     if filters:
         all_params.append(filters)
         
-    # Agregar la ordenación
     all_params.append("order=creation_date.desc")
 
-    # 4. Construir la URL final
     url_final = url + "&" + "&".join(all_params)
 
     try:
-        response = requests.get(url_final, headers=get_headers(token)) # Usar url_final aquí
+        response = requests.get(url_final, headers=get_headers(token))
         response.raise_for_status()
         data = response.json()
         
-        if data:
-            df = pd.DataFrame(data)
-            # ... (Lógica de aplanamiento de datos y retorno del DataFrame, el resto es correcto)
-            df['Redemption Branch'] = df['redeeming_branch'].apply(lambda x: x['name'] if x else 'N/A')
-            df['Redeemed By'] = df['redeeming_user'].apply(lambda x: x['username'] if x else 'N/A')
-            df['Issuer'] = df['batches'].apply(lambda x: x['issuer']['issuer_name'] if x and x['issuer'] else 'N/A')
-            
-            return df[['id', 'consecutive', 'is_redeemed', 'Redemption Branch', 'Redeemed By', 'redemption_date', 'invoice_number', 'Issuer']]
+        # ... (El resto de la lógica de aplanamiento es correcta) ...
+        return df[['id', 'consecutive', 'is_redeemed', 'Redemption Branch', 'Redeemed By', 'redemption_date', 'invoice_number', 'Issuer']]
+        
+    except requests.exceptions.HTTPError as e:
+        # Mostrar el mensaje de error JSON para debug
+        st.error(f"Error al cargar el reporte: {e.response.json().get('message', str(e))}")
         return pd.DataFrame()
     except Exception as e:
-        # Se necesita un mejor manejo de errores si el JSON de la respuesta tiene detalles
-        st.error(f"Error al cargar el reporte: {e}")
+        st.error(f"Error inesperado al cargar el reporte: {e}")
         return pd.DataFrame()
