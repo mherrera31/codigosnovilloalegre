@@ -43,42 +43,46 @@ QR_SIZE_MM = 25
 def create_qr_card(data_to_encode: str, output_path: str, description: str, expiration: str, consecutive: str):
     """
     Genera una imagen de tarjeta (1063x591px @ 300DPI para 9x5cm) con el QR y el consecutivo.
+    (CORREGIDO: Asegura que la variable 'draw' esté definida globalmente en la función.)
     """
-    # Dimensiones en píxeles para 9cm (Ancho) x 5cm (Alto) a 300 DPI
+    if not os.path.exists('generated_qrs'):
+        os.makedirs('generated_qrs')
+        
     card_width, card_height = 1063, 591 
     bg_color, text_color = (255, 255, 255), (0, 0, 0)
     
-    # ... (El resto del código de inicialización y dibujo del encabezado es correcto) ...
-    
-    # --- Lógica de QR y Consecutivo ---
+    # 1. INICIALIZACIÓN DEL LIENZO
+    card_img = Image.new('RGB', (card_width, card_height), bg_color)
+    draw = ImageDraw.Draw(card_img) # <--- ¡DEFINICIÓN DE DRAW AQUI!
+
+    # 2. CONFIGURACIÓN DE FUENTES Y DIBUJO DE ENCABEZADO
+    draw.rectangle([0, 0, card_width, 80], fill=(191, 2, 2))
+    try:
+        title_font = ImageFont.truetype("arialbd.ttf", size=32)
+        main_font = ImageFont.truetype("arial.ttf", size=30)
+        consecutive_font = ImageFont.truetype("arialbd.ttf", size=40)
+    except IOError:
+        title_font = main_font = ImageFont.load_default()
+        consecutive_font = ImageFont.load_default()
+        
+    draw.text((30, 25), "TARJETA DE REGALO NOVILLO ALEGRE", fill=(255,255,255), font=title_font)
+
+    # 3. GENERACIÓN DEL QR
     qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=8, border=2)
     qr.add_data(data_to_encode)
     qr.make(fit=True)
     qr_img = qr.make_image(fill_color="black", back_color="white").convert('RGB')
     
-    # NUEVAS POSICIONES (Ajustadas para 5cm de ALTO x 9cm de ANCHO)
-    
+    # 4. POSICIONES Y DIBUJO DE CONTENIDO
     QR_SIZE_PIXELS = 250
-    # Posición para el QR: Esquina superior derecha, con márgenes
-    # X = Ancho Total - Tamaño QR - Margen (1063 - 250 - 50 = 763)
-    # Y = Margen inferior del encabezado (80) + Margen (50) = 130
-    QR_POSITION = (763, 130)   
+    # Posiciones ajustadas para 5x9cm (5cm Alto x 9cm Ancho)
+    QR_POSITION = (763, 130)   # Ajustado para esquina superior derecha (X=1063-250-50, Y=80+50)
+    CONSECUTIVE_POSITION = (50, 450) # Ajustado para que esté visible en la parte inferior izquierda
     
-    # Posición para el Consecutivo: Abajo a la izquierda, más centrado verticalmente
-    CONSECUTIVE_POSITION = (50, 450) # Ajustado a 450 para que se vea más abajo
-    
-    # --- Dibujar texto y QR en la imagen ---
-    try:
-        main_font = ImageFont.truetype("arial.ttf", size=30)
-        consecutive_font = ImageFont.truetype("arialbd.ttf", size=40)
-    except IOError:
-        main_font = ImageFont.load_default()
-        consecutive_font = ImageFont.load_default()
-        
-    # Texto de la Promoción (Línea 150)
+    # Dibujar Promoción
     draw.text((50, 150), description, fill=text_color, font=main_font)
     
-    # Consecutivo (Línea 450)
+    # Dibujar Consecutivo
     draw.text(CONSECUTIVE_POSITION, f"CONSECUTIVO: {consecutive}", fill=(0, 0, 0), font=consecutive_font)
 
     # Pegar el QR
@@ -87,7 +91,6 @@ def create_qr_card(data_to_encode: str, output_path: str, description: str, expi
     
     card_img.save(output_path)
     return output_path
-
 def generate_pdf_from_images(image_paths, output_filename):
     """Crea un PDF a partir de una lista de imágenes en formato 9x5 cm."""
     pdf = FPDF(orientation='L', unit='mm', format=(CARD_WIDTH_MM, CARD_HEIGHT_MM))
