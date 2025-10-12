@@ -93,9 +93,6 @@ if 'branch_id' not in st.session_state:
 
 if not auth.is_authenticated():
     # PÁGINA DE LOGIN
-    LOGO_URL = "https://placehold.co/300x100/1E3260/FFFFFF/png?text=Novillo+Alegre+QR" # URL genérica estable
-
-# En el LOGIN GATE:
     st.image(LOGO_URL, width=300) 
     st.title("QR-CReator (Inicie Sesion)")
     auth.login_ui()
