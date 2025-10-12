@@ -444,26 +444,28 @@ def get_activity_report(filters: str):
     """Obtiene el reporte de actividad de cupones con joins para mostrar en la tabla."""
     token = st.session_state.get('token')
     
-    # 1. DEFINICIÓN DEL SELECT Y CORRECCIÓN DE LOS JOINS A BRANCHES/PROFILES
+    # 1. DEFINICIÓN DEL SELECT USANDO NOMBRES DE COLUMNA DE FK PARA LOS JOINS
     select_params = (
-        "id,consecutive,is_redeemed,redemption_date,invoice_number,"
+        "id,consecutive,is_redeemed,redemption_date,invoice_number,creation_date,"
         
-        # CORRECCIÓN 1: JOIN al emisor (a través de la tabla batches)
-        "batches(issuer:issuers(issuer_name)),"
+        # JOIN a BATCHES para obtener el Emisor (issuer)
+        # Nota: La FK en coupons es batch_id
+        "batch_id(issuer:issuers(issuer_name))," 
         
-        # CORRECCIÓN 2: JOIN a la sucursal usando la columna de FK (redemption_branch_id)
-        # Esto es más robusto que usar el nombre auto-generado de la FK
-        "redemption_branch:branches(name),"
+        # JOIN a BRANCHES para la sucursal de canje
+        "redemption_branch_id(name)," 
         
-        # CORRECCIÓN 3: JOIN al usuario canjeador (redeemed_by_user_id)
-        # Esto es más robusto que usar el nombre auto-generado de la FK
-        "redeeming_user:profiles(username)"
+        # JOIN a PROFILES para el usuario canjeador
+        "redeemed_by_user_id(username)"
     )
+    
+    # Eliminar espacios para evitar el error 400 (Bad Request)
+    select_params = select_params.replace(' ', '')
 
     # 2. Construcción de la URL
     url = f"{POSTGREST_ENDPOINT}/coupons?select={select_params}"
 
-    # 3. Preparar la lista final de parámetros
+    # ... (El resto de la construcción de la URL)
     all_params = []
     
     if filters:
@@ -478,11 +480,23 @@ def get_activity_report(filters: str):
         response.raise_for_status()
         data = response.json()
         
-        # ... (El resto de la lógica de aplanamiento es correcta) ...
-        return df[['id', 'consecutive', 'is_redeemed', 'Redemption Branch', 'Redeemed By', 'redemption_date', 'invoice_number', 'Issuer']]
+        if data:
+            df = pd.DataFrame(data)
+            # Aplanar los datos usando los nuevos nombres de columna
+            df['Redemption Branch'] = df['redemption_branch_id'].apply(lambda x: x['name'] if x else 'N/A')
+            df['Redeemed By'] = df['redeemed_by_user_id'].apply(lambda x: x['username'] if x else 'N/A')
+            df['Issuer'] = df['batch_id'].apply(lambda x: x['issuer']['issuer_name'] if x and x['issuer'] else 'N/A')
+            
+            # Aseguramos que la columna is_redeemed sea bool
+            df['is_redeemed'] = df['is_redeemed'].astype(bool)
+
+            return df[['id', 'consecutive', 'is_redeemed', 'redemption_date', 'invoice_number', 'Redemption Branch', 'Redeemed By', 'Issuer']]
+        
+        # Si la tabla está vacía, retorna un DataFrame vacío
+        return pd.DataFrame()
         
     except requests.exceptions.HTTPError as e:
-        # Mostrar el mensaje de error JSON para debug
+        # Esto captura el error real (como el 400 anterior)
         st.error(f"Error al cargar el reporte: {e.response.json().get('message', str(e))}")
         return pd.DataFrame()
     except Exception as e:
