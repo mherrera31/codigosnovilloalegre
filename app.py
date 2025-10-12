@@ -36,42 +36,76 @@ if TEMPLATE_PATH_KEY not in st.session_state:
     st.session_state[TEMPLATE_PATH_KEY] = None
 
 
-def create_qr_card(data_to_encode: str, output_path: str, description: str, expiration: str):
-    """Genera una imagen de tarjeta con el QR, optimizada para tamaño de presentación."""
+def get_template_image_path():
+    """Convierte la primera página del PDF de la plantilla a PNG y la retorna."""
+    from pdf2image import convert_from_path
     
-    if not os.path.exists('generated_qrs'):
-        os.makedirs('generated_qrs')
-        
-    card_width, card_height = 875, 500 
-    bg_color, text_color = (255, 255, 255), (0, 0, 0)
-    accent_color = (191, 2, 2) 
+    template_pdf_path = st.session_state.get(TEMPLATE_PATH_KEY)
+    
+    if not template_pdf_path:
+        return None # No hay plantilla cargada
 
+    try:
+        # Convierte solo la primera página del PDF subido a una imagen (PNG)
+        images = convert_from_path(template_pdf_path, 
+                                   first_page=1, last_page=1, 
+                                   dpi=300, 
+                                   size=(1063, 591)) # Tamaño de 9x5cm a 300dpi
+        
+        template_png_path = os.path.join(TEMPLATE_DIR, "template_background.png")
+        images[0].save(template_png_path, 'PNG')
+        return template_png_path
+        
+    except Exception as e:
+        st.error(f"Error al procesar el PDF de la plantilla: {e}")
+        st.session_state[TEMPLATE_PATH_KEY] = None # Eliminar la plantilla si falla
+        return None
+
+
+def create_qr_card(data_to_encode: str, output_path: str, description: str, expiration: str, consecutive: str):
+    """Genera una imagen de tarjeta fusionando el QR/Consecutivo con la plantilla de fondo."""
+    
+    # 1. Obtener el fondo (plantilla o blanco)
+    template_png_path = get_template_image_path()
+    if template_png_path:
+        card_img = Image.open(template_png_path).convert('RGB')
+        draw = ImageDraw.Draw(card_img)
+        # Como hay un fondo, dibujamos el QR y el texto en la posición designada
+    else:
+        # Usar fondo blanco si no hay plantilla
+        card_width, card_height = 1063, 591 
+        bg_color = (255, 255, 255)
+        card_img = Image.new('RGB', (card_width, card_height), bg_color)
+        draw = ImageDraw.Draw(card_img)
+        # Dibujar un banner básico para fondo blanco
+        draw.rectangle([0, 0, card_width, 80], fill=(191, 2, 2))
+        try:
+            title_font = ImageFont.truetype("arialbd.ttf", size=32)
+        except IOError:
+            title_font = ImageFont.load_default()
+        draw.text((30, 25), "TARJETA DE REGALO NOVILLO ALEGRE", fill=(255,255,255), font=title_font)
+
+
+    # --- Lógica de QR y Consecutivo (Esto va EN LA CAPA SUPERIOR) ---
     qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=8, border=2)
     qr.add_data(data_to_encode)
     qr.make(fit=True)
     qr_img = qr.make_image(fill_color="black", back_color="white").convert('RGB')
     
-    card_img = Image.new('RGB', (card_width, card_height), bg_color)
-    draw = ImageDraw.Draw(card_img)
-
-    draw.rectangle([0, 0, card_width, 80], fill=accent_color)
-    try:
-        title_font = ImageFont.truetype("arialbd.ttf", size=32)
-        main_font = ImageFont.truetype("arial.ttf", size=30)
-    except IOError:
-        title_font = main_font = ImageFont.load_default()
-        
-    draw.text((30, 25), "TARJETA DE REGALO NOVILLO ALEGRE", fill=(255,255,255), font=title_font)
-        
-    qr_scaled = qr_img.resize((card_height - 100, card_height - 100))
-    card_img.paste(qr_scaled, (card_width - qr_scaled.width - 50, 100))
+    # Posiciones (DEBES AJUSTAR ESTAS COORDENADAS PARA QUE COINCIDAN CON TU PLANTILLA)
+    QR_POSITION = (700, 300)   # Pixeles X, Y
+    CONSECUTIVE_POSITION = (50, 500) # Pixeles X, Y
+    QR_SIZE_PIXELS = 250
     
-    draw.text((50, 150), description, fill=text_color, font=main_font)
-    draw.text((50, 220), f"Válido hasta: {expiration}", fill=(100, 100, 100), font=main_font)
+    qr_scaled = qr_img.resize((QR_SIZE_PIXELS, QR_SIZE_PIXELS))
+    card_img.paste(qr_scaled, QR_POSITION)
+    
+    consecutive_font = ImageFont.truetype("arialbd.ttf", size=40)
+    draw.text(CONSECUTIVE_POSITION, f"CONSECUTIVO: {consecutive}", fill=(0, 0, 0), font=consecutive_font)
 
     card_img.save(output_path)
     return output_path
-
+    
 def generate_pdf_from_images(image_paths, output_filename):
     """Crea un PDF a partir de una lista de imágenes, cada una en una página tamaño tarjeta."""
     CARD_WIDTH_MM = 85.6
