@@ -114,7 +114,8 @@ with st.sidebar:
     st.sidebar.header("Menú de Navegación")
     
     if user_role:
-        st.success(f"**Usuario:** {st.session_state.get('username', user.email)}")
+        # CORRECCIÓN AQUÍ: Usamos user.get('email') en lugar de user.email
+        st.success(f"**Usuario:** {st.session_state.get('username', user.get('email', 'N/A'))}")
         st.success(f"**Rol:** {user_role}")
         
         # Opciones de menú basadas en el rol
