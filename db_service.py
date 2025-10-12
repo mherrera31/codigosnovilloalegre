@@ -444,13 +444,23 @@ def get_activity_report(filters: str):
     """Obtiene el reporte de actividad de cupones con joins para mostrar en la tabla."""
     token = st.session_state.get('token')
     
-    # 1. CORRECCIÓN CLAVE: Eliminar todos los espacios después de las comas.
-    select_params = "id,consecutive,is_redeemed,redemption_date,invoice_number,batches(issuer:issuers(issuer_name)),redeeming_branch:branches!coupons_redemption_branch_id_fkey(name),redeeming_user:profiles!coupons_redeemed_by_user_id_fkey(username)"
-    
-    # Asegurarse de que no haya espacios en absoluto:
-    select_params = select_params.replace(' ', '')
-    
-    # 2. Construcción de la URL (El resto del código de la URL que corrige el doble && ya es correcto)
+    # 1. DEFINICIÓN DEL SELECT Y CORRECCIÓN DE LOS JOINS A BRANCHES/PROFILES
+    select_params = (
+        "id,consecutive,is_redeemed,redemption_date,invoice_number,"
+        
+        # CORRECCIÓN 1: JOIN al emisor (a través de la tabla batches)
+        "batches(issuer:issuers(issuer_name)),"
+        
+        # CORRECCIÓN 2: JOIN a la sucursal usando la columna de FK (redemption_branch_id)
+        # Esto es más robusto que usar el nombre auto-generado de la FK
+        "redemption_branch:branches(name),"
+        
+        # CORRECCIÓN 3: JOIN al usuario canjeador (redeemed_by_user_id)
+        # Esto es más robusto que usar el nombre auto-generado de la FK
+        "redeeming_user:profiles(username)"
+    )
+
+    # 2. Construcción de la URL
     url = f"{POSTGREST_ENDPOINT}/coupons?select={select_params}"
 
     # 3. Preparar la lista final de parámetros
