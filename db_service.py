@@ -444,19 +444,20 @@ def get_activity_report(filters: str):
     """Obtiene el reporte de actividad de cupones con joins para mostrar en la tabla."""
     token = st.session_state.get('token')
     
-    # 1. DEFINICIÓN DEL SELECT USANDO NOMBRES DE COLUMNA DE FK PARA LOS JOINS
+    # 1. DEFINICIÓN DEL SELECT USANDO LA SINTAXIS EXPLÍCITA Y CORREGIDA
     select_params = (
         "id,consecutive,is_redeemed,redemption_date,invoice_number,creation_date,"
         
-        # JOIN a BATCHES para obtener el Emisor (issuer)
-        # Nota: La FK en coupons es batch_id
-        "batch_id(issuer:issuers(issuer_name))," 
+        # JOIN al emisor (a través de la tabla batches)
+        # Nota: PostgREST usa el nombre de la FK (batch_id) o la relación (batches)
+        "batch_id(issuer_id(issuer_name))," # Usamos la columna FK batch_id(FK_COL_ID(COL))
         
-        # JOIN a BRANCHES para la sucursal de canje
-        "redemption_branch_id(name)," 
+        # CORRECCIÓN CLAVE: Usamos el nombre de la columna + tabla de destino
+        # La convención más robusta de PostgREST es usar la FK como si fuera la relación
+        "redemption_branch_id:branches(name)," 
         
-        # JOIN a PROFILES para el usuario canjeador
-        "redeemed_by_user_id(username)"
+        # JOIN al usuario canjeador (redeemed_by_user_id)
+        "redeemed_by_user_id:profiles(username)"
     )
     
     # Eliminar espacios para evitar el error 400 (Bad Request)
@@ -482,21 +483,21 @@ def get_activity_report(filters: str):
         
         if data:
             df = pd.DataFrame(data)
-            # Aplanar los datos usando los nuevos nombres de columna
+            
+            # Aplanamiento usando los nuevos nombres de columna
+            # Si el join funciona, el nombre del campo en el JSON será 'redemption_branch_id'
             df['Redemption Branch'] = df['redemption_branch_id'].apply(lambda x: x['name'] if x else 'N/A')
             df['Redeemed By'] = df['redeemed_by_user_id'].apply(lambda x: x['username'] if x else 'N/A')
-            df['Issuer'] = df['batch_id'].apply(lambda x: x['issuer']['issuer_name'] if x and x['issuer'] else 'N/A')
+            # El campo del emisor es un join anidado: batch_id -> issuer_id -> issuer_name
+            df['Issuer'] = df['batch_id'].apply(lambda x: x['issuer_id']['issuer_name'] if x and x['issuer_id'] else 'N/A')
             
-            # Aseguramos que la columna is_redeemed sea bool
             df['is_redeemed'] = df['is_redeemed'].astype(bool)
 
             return df[['id', 'consecutive', 'is_redeemed', 'redemption_date', 'invoice_number', 'Redemption Branch', 'Redeemed By', 'Issuer']]
         
-        # Si la tabla está vacía, retorna un DataFrame vacío
         return pd.DataFrame()
         
     except requests.exceptions.HTTPError as e:
-        # Esto captura el error real (como el 400 anterior)
         st.error(f"Error al cargar el reporte: {e.response.json().get('message', str(e))}")
         return pd.DataFrame()
     except Exception as e:
