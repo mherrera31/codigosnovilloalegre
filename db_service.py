@@ -5,19 +5,23 @@ import pandas as pd
 import json
 import auth
 from db_config import POSTGREST_ENDPOINT, get_headers
+import auth
 
 # --- Funciones de Lectura General ---
 
 def get_data_table(table_name: str, select_params: str = '*'):
-    """Obtiene datos de una tabla usando la API REST de PostgREST."""
-    url = f"{POSTGREST_ENDPOINT}/{table_name}?select={select_params}"
+    """Obtiene datos de una tabla específica."""
     
-    # Usar el token del usuario si está logueado, sino usar la clave anónima (solo para lectura pública)
+    # 1. OBTENER EL TOKEN DEL USUARIO LOGUEADO
     token = st.session_state.get('token')
     
+    # 2. Generar URL
+    url = f"{POSTGREST_ENDPOINT}/{table_name}?select={select_params}"
+    
     try:
+        # 3. Llamar con las cabeceras que contienen el token
         response = requests.get(url, headers=get_headers(token))
-        response.raise_for_status()
+        response.raise_for_status() 
         return response.json()
     except Exception as e:
         st.error(f"Error al cargar datos de {table_name}: {e}")
