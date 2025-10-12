@@ -26,6 +26,7 @@ def sign_in(email, password):
         
         # 2. Consultar el perfil (rol y sucursal) usando el token
         profile_response = requests.get(
+    # Faltaba asegurar el uso del token en esta llamada.
             f"{POSTGREST_ENDPOINT}/profiles?id=eq.{user_id}&select=*,roles(role_name)", 
             headers=get_headers(token)
         )
