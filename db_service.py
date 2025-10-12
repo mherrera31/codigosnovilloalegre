@@ -444,33 +444,40 @@ def get_activity_report(filters: str):
     """Obtiene el reporte de actividad de cupones con joins para mostrar en la tabla."""
     token = st.session_state.get('token')
     
-    # Consulta: Cupones con JOINs a Usuarios (Creador y Cajero) y Sucursal (Canje)
-    select_params = "id,consecutive,batch_id,is_redeemed,redemption_date,invoice_number,"
-    select_params += "redemption_branch:branches!coupons_redemption_branch_id_fkey(name),"
-    select_params += "creator:profiles!coupons_created_by_user_id_fkey(username)" 
-    
-    # Nota: El campo creator no existe en coupons, asumimos que el user_id está en batches. 
-    # Usaremos el creador del lote (debes ajustar esto si el creador del cupón es diferente)
-    
-    # Para simplificar y alinearlo con la estructura de tu SQL original, usaremos joins simples:
-    select_params = "id, consecutive, is_redeemed, redemption_date, invoice_number, batches(issuer_id, created_by_user_id)"
+    # 1. Definición de la selección (SELECT)
+    select_params = "id, consecutive, is_redeemed, redemption_date, invoice_number, batches(issuer:issuers(issuer_name)), redeeming_branch:branches!coupons_redemption_branch_id_fkey(name), redeeming_user:profiles!coupons_redeemed_by_user_id_fkey(username)"
 
-    url = f"{POSTGREST_ENDPOINT}/coupons?select=*,batches(issuer:issuers(issuer_name)),redeeming_branch:branches!coupons_redemption_branch_id_fkey(name),redeeming_user:profiles!coupons_redeemed_by_user_id_fkey(username)&{filters}&order=creation_date.desc"
+    # 2. Construcción de la URL base
+    url = f"{POSTGREST_ENDPOINT}/coupons?select={select_params}"
+
+    # 3. Preparar la lista final de parámetros (incluye filtros y orden)
+    all_params = []
+    
+    # Agregar filtros (si existen)
+    if filters:
+        all_params.append(filters)
+        
+    # Agregar la ordenación
+    all_params.append("order=creation_date.desc")
+
+    # 4. Construir la URL final
+    url_final = url + "&" + "&".join(all_params)
 
     try:
-        response = requests.get(url, headers=get_headers(token))
+        response = requests.get(url_final, headers=get_headers(token)) # Usar url_final aquí
         response.raise_for_status()
         data = response.json()
         
         if data:
             df = pd.DataFrame(data)
-            # Aplanar los datos
-            df['redemption_branch'] = df['redeeming_branch'].apply(lambda x: x['name'] if x else 'N/A')
-            df['redeemed_by'] = df['redeeming_user'].apply(lambda x: x['username'] if x else 'N/A')
-            # Necesitaríamos más joins para el creador. Por ahora, solo usamos los datos principales.
+            # ... (Lógica de aplanamiento de datos y retorno del DataFrame, el resto es correcto)
+            df['Redemption Branch'] = df['redeeming_branch'].apply(lambda x: x['name'] if x else 'N/A')
+            df['Redeemed By'] = df['redeeming_user'].apply(lambda x: x['username'] if x else 'N/A')
+            df['Issuer'] = df['batches'].apply(lambda x: x['issuer']['issuer_name'] if x and x['issuer'] else 'N/A')
             
-            return df[['id', 'consecutive', 'is_redeemed', 'redemption_date', 'redemption_branch', 'redeemed_by', 'invoice_number']]
+            return df[['id', 'consecutive', 'is_redeemed', 'Redemption Branch', 'Redeemed By', 'redemption_date', 'invoice_number', 'Issuer']]
         return pd.DataFrame()
     except Exception as e:
+        # Se necesita un mejor manejo de errores si el JSON de la respuesta tiene detalles
         st.error(f"Error al cargar el reporte: {e}")
         return pd.DataFrame()
