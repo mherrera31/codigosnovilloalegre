@@ -1,4 +1,4 @@
-# app.py (VERSIÓN CONSOLIDADA Y CORREGIDA PARA EL DESPLIEGUE)
+# app.py (VERSIÓN CONSOLIDADA Y CORREGIDA FINAL)
 import streamlit as st
 import auth 
 import db_service
@@ -14,17 +14,12 @@ from datetime import datetime, timedelta
 import pandas as pd
 from pyzbar.pyzbar import decode
 from fpdf import FPDF 
-from db_config import get_headers # Solo necesitamos get_headers de db_config
+from db_config import get_headers 
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(page_title="Sistema de QR Novillo Alegre", layout="wide")
 
 LOGO_URL = "https://placehold.co/300x100/1E3260/FFFFFF/png?text=Novillo+Alegre+QR"
-
-# ----------------------------------------
-# FUNCIONES AUXILIARES (QR y PDF)
-# NOTA: Estas funciones fueron consolidadas aquí. En un paso posterior, deben ir a qr_utils.py
-# ----------------------------------------
 
 # --- CONFIGURACIÓN DE RUTAS ---
 TEMPLATE_DIR = 'design_templates'
@@ -35,81 +30,65 @@ TEMPLATE_PATH_KEY = 'current_template_path'
 if TEMPLATE_PATH_KEY not in st.session_state:
     st.session_state[TEMPLATE_PATH_KEY] = None
 
+# 9cm x 5cm en mm = 90mm x 50mm
+CARD_WIDTH_MM = 90
+CARD_HEIGHT_MM = 50
+QR_SIZE_MM = 25 
 
-def get_template_image_path():
-    """Convierte la primera página del PDF de la plantilla a PNG y la retorna."""
-    from pdf2image import convert_from_path
-    
-    template_pdf_path = st.session_state.get(TEMPLATE_PATH_KEY)
-    
-    if not template_pdf_path:
-        return None # No hay plantilla cargada
 
-    try:
-        # Convierte solo la primera página del PDF subido a una imagen (PNG)
-        images = convert_from_path(template_pdf_path, 
-                                   first_page=1, last_page=1, 
-                                   dpi=300, 
-                                   size=(1063, 591)) # Tamaño de 9x5cm a 300dpi
-        
-        template_png_path = os.path.join(TEMPLATE_DIR, "template_background.png")
-        images[0].save(template_png_path, 'PNG')
-        return template_png_path
-        
-    except Exception as e:
-        st.error(f"Error al procesar el PDF de la plantilla: {e}")
-        st.session_state[TEMPLATE_PATH_KEY] = None # Eliminar la plantilla si falla
-        return None
-
+# ----------------------------------------
+# FUNCIONES AUXILIARES (QR y PDF)
+# ----------------------------------------
 
 def create_qr_card(data_to_encode: str, output_path: str, description: str, expiration: str, consecutive: str):
-    """Genera una imagen de tarjeta fusionando el QR/Consecutivo con la plantilla de fondo."""
+    """
+    Genera una imagen de tarjeta (1063x591px @ 300DPI para 9x5cm) con el QR y el consecutivo.
+    (CORREGIDO: Acepta 5 argumentos)
+    """
+    if not os.path.exists('generated_qrs'):
+        os.makedirs('generated_qrs')
+        
+    card_width, card_height = 1063, 591 
+    bg_color, text_color = (255, 255, 255), (0, 0, 0)
     
-    # 1. Obtener el fondo (plantilla o blanco)
-    template_png_path = get_template_image_path()
-    if template_png_path:
-        card_img = Image.open(template_png_path).convert('RGB')
-        draw = ImageDraw.Draw(card_img)
-        # Como hay un fondo, dibujamos el QR y el texto en la posición designada
-    else:
-        # Usar fondo blanco si no hay plantilla
-        card_width, card_height = 1063, 591 
-        bg_color = (255, 255, 255)
-        card_img = Image.new('RGB', (card_width, card_height), bg_color)
-        draw = ImageDraw.Draw(card_img)
-        # Dibujar un banner básico para fondo blanco
-        draw.rectangle([0, 0, card_width, 80], fill=(191, 2, 2))
-        try:
-            title_font = ImageFont.truetype("arialbd.ttf", size=32)
-        except IOError:
-            title_font = ImageFont.load_default()
-        draw.text((30, 25), "TARJETA DE REGALO NOVILLO ALEGRE", fill=(255,255,255), font=title_font)
+    # --- Lógica de Fondo (Temporalmente blanco, asumiendo que el PDF2Image está deshabilitado) ---
+    card_img = Image.new('RGB', (card_width, card_height), bg_color)
+    draw = ImageDraw.Draw(card_img)
 
+    # Dibujar un encabezado simple para fondo blanco
+    draw.rectangle([0, 0, card_width, 80], fill=(191, 2, 2))
+    try:
+        title_font = ImageFont.truetype("arialbd.ttf", size=32)
+        main_font = ImageFont.truetype("arial.ttf", size=30)
+        consecutive_font = ImageFont.truetype("arialbd.ttf", size=40)
+    except IOError:
+        title_font = main_font = ImageFont.load_default()
+        consecutive_font = ImageFont.load_default()
+        
+    draw.text((30, 25), "TARJETA DE REGALO NOVILLO ALEGRE", fill=(255,255,255), font=title_font)
 
-    # --- Lógica de QR y Consecutivo (Esto va EN LA CAPA SUPERIOR) ---
+    # --- Lógica de QR y Consecutivo ---
     qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=8, border=2)
     qr.add_data(data_to_encode)
     qr.make(fit=True)
     qr_img = qr.make_image(fill_color="black", back_color="white").convert('RGB')
     
-    # Posiciones (DEBES AJUSTAR ESTAS COORDENADAS PARA QUE COINCIDAN CON TU PLANTILLA)
-    QR_POSITION = (700, 300)   # Pixeles X, Y
-    CONSECUTIVE_POSITION = (50, 500) # Pixeles X, Y
+    # Posiciones (Ajuste para 9x5cm)
     QR_SIZE_PIXELS = 250
+    QR_POSITION = (780, 250)
+    CONSECUTIVE_POSITION = (50, 500)
     
+    draw.text((50, 150), description, fill=text_color, font=main_font)
+    draw.text(CONSECUTIVE_POSITION, f"CONSECUTIVO: {consecutive}", fill=(0, 0, 0), font=consecutive_font)
+
     qr_scaled = qr_img.resize((QR_SIZE_PIXELS, QR_SIZE_PIXELS))
     card_img.paste(qr_scaled, QR_POSITION)
     
-    consecutive_font = ImageFont.truetype("arialbd.ttf", size=40)
-    draw.text(CONSECUTIVE_POSITION, f"CONSECUTIVO: {consecutive}", fill=(0, 0, 0), font=consecutive_font)
-
     card_img.save(output_path)
     return output_path
-    
+
 def generate_pdf_from_images(image_paths, output_filename):
-    """Crea un PDF a partir de una lista de imágenes, cada una en una página tamaño tarjeta."""
-    CARD_WIDTH_MM = 85.6
-    CARD_HEIGHT_MM = 53.98
+    """Crea un PDF a partir de una lista de imágenes en formato 9x5 cm."""
     pdf = FPDF(orientation='L', unit='mm', format=(CARD_WIDTH_MM, CARD_HEIGHT_MM))
     
     for image_path in image_paths:
@@ -118,6 +97,28 @@ def generate_pdf_from_images(image_paths, output_filename):
         
     pdf.output(output_filename)
     return output_filename
+
+def generate_design_template(output_filename):
+    """Genera una plantilla de PDF con espacio blanco para el arte, QR y consecutivo (9x5 cm)."""
+    pdf = FPDF(orientation='L', unit='mm', format=(CARD_WIDTH_MM, CARD_HEIGHT_MM))
+    pdf.add_page()
+    
+    pdf.set_font("Arial", "B", 8)
+    pdf.cell(CARD_WIDTH_MM, 5, "PLANTILLA DE DISEÑO (9x5 CM)", 0, 1, 'C')
+    
+    QR_POS_X_MM = 65 
+    QR_POS_Y_MM = 15 
+    
+    pdf.set_fill_color(255, 255, 255)
+    pdf.rect(QR_POS_X_MM, QR_POS_Y_MM, QR_SIZE_MM, QR_SIZE_MM, 'F') 
+    
+    pdf.set_text_color(150, 150, 150)
+    pdf.set_font("Arial", "", 6)
+    pdf.set_xy(QR_POS_X_MM, QR_POS_Y_MM + 1)
+    pdf.multi_cell(QR_SIZE_MM, 2.5, "ESPACIO QR\n2.5x2.5 cm", 0, 'C')
+    
+    pdf.output(output_filename)
+
 
 # ----------------------------------------
 # LÓGICA DE INICIALIZACIÓN Y CONTROL DE ACCESO
@@ -136,7 +137,6 @@ if 'branch_id' not in st.session_state:
 # ----------------------------------------
 
 if not auth.is_authenticated():
-    # PÁGINA DE LOGIN
     st.image(LOGO_URL, width=300) 
     st.title("QR-CReator (Inicie Sesion)")
     auth.login_ui()
@@ -158,11 +158,9 @@ with st.sidebar:
     st.sidebar.header("Menú de Navegación")
     
     if user_role:
-        # CORRECCIÓN AQUÍ: Usamos user.get('email') en lugar de user.email
         st.success(f"**Usuario:** {st.session_state.get('username', user.get('email', 'N/A'))}")
         st.success(f"**Rol:** {user_role}")
         
-        # Opciones de menú basadas en el rol
         menu_options = ["🏠 Dashboard"]
         
         if user_role == 'Admin':
@@ -199,11 +197,10 @@ elif app_mode == "🔑 Gestión de Usuarios (Admin)":
 elif app_mode == "⚙️ Configuración (Admin)":
     db_service.render_config_management()
     
-# --- MÓDULOS PENDIENTES DE REFACTORIZAR (Módulos de Negocio Central) ---
+# --- MÓDULO CREADOR DE QRS (MIGRADO A SUPABASE) ---
 
 elif app_mode == "🛠️ Creador de QRs":
     
-    # Obtener datos maestros (Solo se ejecuta si el usuario es Admin/Creator)
     promos = db_service.get_promos()
     branches = db_service.get_branches()
     issuers = db_service.get_issuers()
@@ -226,10 +223,9 @@ elif app_mode == "🛠️ Creador de QRs":
                 selected_promo_name = st.selectbox("Seleccionar Promoción/Diseño", options=list(promo_options.keys()))
                 selected_promo = promo_options.get(selected_promo_name)
                 
-                # Campos de valor pre-llenados (requiere que la tabla 'promos' tenga estos campos)
                 st.caption(f"Descripción: {selected_promo['description']}")
                 value_crc = st.number_input("Valor de Referencia (Colones)", value=selected_promo['value'], min_value=0.0, format="%.2f")
-                value_usd = st.number_input("Valor de Referencia (Dólares)", value=round(selected_promo['value'] / 590, 2), min_value=0.0, format="%.2f") # Tasa de cambio simulada
+                value_usd = st.number_input("Valor de Referencia (Dólares)", value=round(selected_promo['value'] / 590, 2), min_value=0.0, format="%.2f")
             
             with col2:
                 valid_days = st.number_input("Días de vigencia", min_value=1, max_value=365, value=30)
@@ -248,7 +244,6 @@ elif app_mode == "🛠️ Creador de QRs":
             else:
                 st.success(f"Generando {count} tarjeta(s)...")
                 
-                # LLAMADA A LA FUNCIÓN MIGRADA DE SUPABASE
                 coupon_entries = db_service.create_coupon_batch(
                     count=count,
                     description=selected_promo['description'],
@@ -257,7 +252,7 @@ elif app_mode == "🛠️ Creador de QRs":
                     value_usd=value_usd,
                     issuer_id=issuer_id,
                     valid_days=valid_days,
-                    branch_names=allowed_branches, # Se convierte a IDs dentro del servicio
+                    branch_names=allowed_branches,
                     user_id=user_id,
                     batch_name_prefix=selected_promo_name
                 )
@@ -266,19 +261,16 @@ elif app_mode == "🛠️ Creador de QRs":
                     st.balloons()
                     generated_image_paths = []
                     
-                    # Generar imágenes y preparar el PDF
                     for entry in coupon_entries:
                         unique_id = entry['id']
-                        consecutive = str(entry['consecutive']).zfill(4) # Formato 0001
+                        consecutive = str(entry['consecutive']).zfill(4) 
                         expiration = entry['expiration_date']
                         
                         output_path = os.path.join('generated_qrs', f"{unique_id}.png")
                         
-                        # Usar la función de creación de tarjeta (que será modificada en Tarea D)
+                        # LLAMADA CORREGIDA CON 5 ARGUMENTOS
                         create_qr_card(unique_id, output_path, selected_promo['description'], expiration, consecutive)
                         generated_image_paths.append(output_path)
-                        
-                        # ... (Mostrar tarjetas individuales con botón de descarga si es necesario)
                         
                     # Sección de Descarga de Lote PDF
                     st.subheader("⬇️ Descargar Lote Completo")
@@ -325,7 +317,6 @@ elif app_mode == "🛠️ Creador de QRs":
         )
         
         if uploaded_file is not None:
-            # Guardar el archivo subido de forma persistente
             template_filename = "plantilla_arte_activa.pdf"
             save_path = os.path.join(TEMPLATE_DIR, template_filename)
             
@@ -335,7 +326,6 @@ elif app_mode == "🛠️ Creador de QRs":
             st.session_state[TEMPLATE_PATH_KEY] = save_path
             st.success(f"Plantilla de Arte cargada exitosamente: {uploaded_file.name}")
             
-        # Mostrar el estado actual de la plantilla
         if st.session_state[TEMPLATE_PATH_KEY]:
             st.info(f"🎨 **Plantilla Actual:** {os.path.basename(st.session_state[TEMPLATE_PATH_KEY])} (Lista para usar en el Generador de Lote).")
         else:
@@ -344,50 +334,53 @@ elif app_mode == "🛠️ Creador de QRs":
 
 
 elif app_mode == "📲 Escáner (Cajero)":
-    # Lógica del escáner pendiente de migrar a Supabase
-    st.warning("Módulo pendiente de migración de SQLite a Supabase.")
-    st.info("Para que este módulo funcione, debe: 1. Migrar la lógica de validación y canje del app.py original para usar db_service.py.")
+    # Usar el módulo de HTML/PWA
+    st.warning("Módulo de escáner migrado a PWA. Presione el botón para abrir la aplicación de canje móvil.")
+    
+    st.info("Debe configurar la URL del escáner PWA en la sección de código.")
+    
+    # URL de ejemplo (DEBE SER CAMBIADA POR TU URL ALOJADA)
+    PWA_BASE_URL = "https://tudominio.com/scanner.html" 
+    st.link_button("Abrir Escáner de Canje", url=PWA_BASE_URL, type="primary")
 
 
 elif app_mode == "📊 Reportes (Admin)":
+    
+    if user_role != 'Admin':
+        st.error("Acceso denegado. Solo administradores pueden ver reportes.")
+        st.stop()
+        
     st.header("Módulo de Reportes de Actividad")
     
     st.sidebar.header("Filtros de Reporte")
-    conn = get_db_connection()
-    branches = conn.execute("SELECT name FROM branches").fetchall()
+    
+    # --- OBTENER DATOS DE SUPABASE ---
+    branches = db_service.get_branches()
+    branch_names = [b['name'] for b in branches]
     
     selected_status = st.sidebar.selectbox("Estado", ["Todos", "Canjeados", "No Canjeados"])
     start_date = st.sidebar.date_input("Fecha de creación (desde)", value=None)
     end_date = st.sidebar.date_input("Fecha de creación (hasta)", value=None)
 
-    query = """
-        SELECT qr.uuid, qr.description, qr.is_redeemed, 
-               b.name as redemption_branch, qr.redemption_date, qr.invoice_number,
-               uc.username as creator, qr.creation_date
-        FROM qr_codes qr
-        LEFT JOIN users uc ON qr.created_by = uc.id
-        LEFT JOIN branches b ON qr.redemption_branch_id = b.id
-        WHERE 1=1
-    """
-    params = []
-    
+    # Lógica para construir el filtro de PostgREST
+    filters = []
     if selected_status == "Canjeados":
-        query += " AND qr.is_redeemed = 1"
+        filters.append("is_redeemed=eq.true")
     elif selected_status == "No Canjeados":
-        query += " AND qr.is_redeemed = 0"
+        filters.append("is_redeemed=eq.false")
         
     if start_date:
-        query += " AND date(qr.creation_date) >= ?"
-        params.append(start_date)
+        filters.append(f"creation_date=gte.{start_date}")
     if end_date:
-        query += " AND date(qr.creation_date) <= ?"
-        params.append(end_date)
+        filters.append(f"creation_date=lte.{end_date}")
     
-    df = pd.read_sql_query(query, conn, params=params)
-    conn.close()
+    filter_string = "&".join(filters)
+    
+    # LLAMADA MIGRADA A SUPABASE
+    df = db_service.get_activity_report(filter_string)
     
     st.subheader("Datos Completos")
-    st.dataframe(df)
+    st.dataframe(df, width='stretch')
 
     # Métricas
     if not df.empty:
