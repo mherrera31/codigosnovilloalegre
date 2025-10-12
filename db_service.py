@@ -114,6 +114,9 @@ def render_config_management():
     with tab_branch:
         st.subheader("Administrar Sucursales")
         
+        # Obtener los datos una sola vez
+        branches_data = get_branches()
+        
         col1, col2 = st.columns(2)
         with col1:
             st.markdown("#### Crear Nueva Sucursal")
@@ -129,40 +132,48 @@ def render_config_management():
                     st.warning("El nombre de la sucursal es obligatorio.")
         
         with col2:
-            st.markdown("---")
-            st.markdown("#### Sucursales Existentes (Editar / Eliminar)")
-            branches_data = get_branches()
-            
+            st.markdown("#### Lista Completa")
             if branches_data:
-                for branch in branches_data:
-                    # Usar un expander para cada registro para editar
-                    with st.expander(f"Sucursal ID {branch['id']} - {branch['name']}"):
-                        
-                        # Formulario de Edición
-                        with st.form(f"edit_branch_{branch['id']}"):
-                            new_name = st.text_input("Nombre", value=branch['name'], key=f"name_{branch['id']}")
-                            new_address = st.text_area("Dirección", value=branch['address'], key=f"address_{branch['id']}")
-                            
-                            col_b1, col_b2 = st.columns(2)
-                            with col_b1:
-                                save_button = st.form_submit_button("Guardar Cambios", type="primary")
-                            with col_b2:
-                                # Botón de Eliminar (dentro del formulario para evitar reruns accidentales)
-                                delete_button = st.form_submit_button("Eliminar Sucursal", type="secondary")
-                                
-                            if save_button:
-                                if update_entry('branches', branch['id'], {'name': new_name, 'address': new_address}):
-                                    st.success("Sucursal actualizada.")
-                                    st.rerun()
-                                    
-                            if delete_button:
-                                if delete_entry('branches', branch['id']):
-                                    st.success("Sucursal eliminada.")
-                                    st.rerun()
-        
+                df_branches = pd.DataFrame(branches_data)
+                # CORRECCIÓN DE LA ADVERTENCIA AQUÍ
+                st.dataframe(df_branches, width='stretch')
             else:
                 st.info("No hay sucursales registradas.")
 
+
+        st.markdown("---")
+        st.markdown("#### Editar / Eliminar Sucursales")
+        
+        if branches_data:
+            for branch in branches_data:
+                # Usar un expander para cada registro para editar
+                with st.expander(f"Sucursal ID {branch['id']} - {branch['name']}"):
+                    
+                    # Formulario de Edición/Eliminación
+                    with st.form(f"edit_branch_{branch['id']}"):
+                        new_name = st.text_input("Nombre", value=branch['name'], key=f"name_{branch['id']}")
+                        new_address = st.text_area("Dirección", value=branch['address'] if branch['address'] else "", key=f"address_{branch['id']}")
+                        
+                        col_b1, col_b2 = st.columns(2)
+                        with col_b1:
+                            save_button = st.form_submit_button("Guardar Cambios", type="primary")
+                        with col_b2:
+                            delete_button = st.form_submit_button("Eliminar Sucursal", type="secondary")
+                            
+                        if save_button:
+                            if update_entry('branches', branch['id'], {'name': new_name, 'address': new_address}):
+                                st.success("Sucursal actualizada.")
+                                st.rerun()
+                                
+                        if delete_button:
+                            # Confirmación simple antes de eliminar (puedes añadir un modal si lo deseas)
+                            if st.warning("¿Está seguro? Esto es irreversible."): 
+                                if delete_entry('branches', branch['id']):
+                                    st.success("Sucursal eliminada.")
+                                    st.rerun()
+
+        else:
+            st.info("No hay sucursales para editar.")
 
     # ------------------
     # TABLA EMISORES
