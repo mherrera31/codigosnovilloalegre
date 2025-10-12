@@ -43,11 +43,18 @@ QR_SIZE_MM = 25
 def create_qr_card(data_to_encode: str, output_path: str, description: str, expiration: str, consecutive: str):
     """
     Genera una imagen de tarjeta (9cm ANCHO x 5cm ALTO @ 300DPI) con el QR y el consecutivo.
+    
+    Parámetros:
+    - data_to_encode: El UUID del cupón.
+    - output_path: Ruta donde guardar la imagen PNG.
+    - description: La descripción de la promoción.
+    - expiration: Fecha de vencimiento.
+    - consecutive: Número consecutivo (Ej: 0001).
     """
     if not os.path.exists('generated_qrs'):
         os.makedirs('generated_qrs')
         
-    # CORRECCIÓN DE DIMENSIONES: 9cm ANCHO (1063px) x 5cm ALTO (591px)
+    # Dimensiones en píxeles para 9cm ANCHO (1063px) x 5cm ALTO (591px) a 300 DPI
     card_width, card_height = 1063, 591 
     bg_color, text_color = (255, 255, 255), (0, 0, 0)
     
@@ -55,27 +62,47 @@ def create_qr_card(data_to_encode: str, output_path: str, description: str, expi
     card_img = Image.new('RGB', (card_width, card_height), bg_color)
     draw = ImageDraw.Draw(card_img) 
 
-    # ... (El resto del código de encabezado y fuentes es correcto) ...
+    # 2. CONFIGURACIÓN DE FUENTES Y DIBUJO DE ENCABEZADO
+    draw.rectangle([0, 0, card_width, 80], fill=(191, 2, 2))
+    
+    try:
+        # Definición de las tres fuentes si la carga es exitosa
+        title_font = ImageFont.truetype("arialbd.ttf", size=32)
+        main_font = ImageFont.truetype("arial.ttf", size=30)
+        consecutive_font = ImageFont.truetype("arialbd.ttf", size=40)
+    except IOError:
+        # Definición de las tres fuentes si la carga falla (usando fuente por defecto)
+        default_font = ImageFont.load_default()
+        title_font = default_font 
+        main_font = default_font
+        consecutive_font = default_font
+        
+    draw.text((30, 25), "TARJETA DE REGALO NOVILLO ALEGRE", fill=(255,255,255), font=title_font)
 
+    # 3. GENERACIÓN DEL QR
+    qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=8, border=2)
+    qr.add_data(data_to_encode)
+    qr.make(fit=True)
+    qr_img = qr.make_image(fill_color="black", back_color="white").convert('RGB')
+    
     # 4. POSICIONES Y DIBUJO DE CONTENIDO
     QR_SIZE_PIXELS = 250
-    # Posiciones AJUSTADAS para 9cm de ANCHO x 5cm de ALTO
     
-    # Posición del QR: Esquina derecha, con margen suficiente
-    # X = 1063 - 250 - 50 = 763
-    # Y = 130 (margen inferior del encabezado)
-    QR_POSITION = (763, 130)   
+    # Posiciones ajustadas para 9cm ANCHO x 5cm ALTO
+    QR_POSITION = (763, 130)       # Esquina superior derecha (X=1063-250-50, Y=80+50)
+    CONSECUTIVE_POSITION = (50, 450) # Parte inferior izquierda
+    EXPIRATION_POSITION = (50, 220)  # Debajo de la descripción
     
-    # Posición del Consecutivo: Parte inferior izquierda
-    CONSECUTIVE_POSITION = (50, 500) 
-
-    # Dibujar Promoción
+    # Dibujar Promoción (description)
     draw.text((50, 150), description, fill=text_color, font=main_font)
     
+    # Dibujar Válido hasta (expiration)
+    draw.text(EXPIRATION_POSITION, f"Válido hasta: {expiration}", fill=(100, 100, 100), font=main_font)
+
     # Dibujar Consecutivo
     draw.text(CONSECUTIVE_POSITION, f"CONSECUTIVO: {consecutive}", fill=(0, 0, 0), font=consecutive_font)
 
-    # 5. PEGAR EL QR (Esto debe funcionar ahora con las coordenadas ajustadas)
+    # Pegar el QR
     qr_scaled = qr_img.resize((QR_SIZE_PIXELS, QR_SIZE_PIXELS))
     card_img.paste(qr_scaled, QR_POSITION)
     
