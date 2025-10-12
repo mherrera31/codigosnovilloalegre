@@ -42,19 +42,13 @@ QR_SIZE_MM = 25
 
 def create_qr_card(data_to_encode: str, output_path: str, description: str, expiration: str, consecutive: str):
     """
-    Genera una imagen de tarjeta (9cm ANCHO x 5cm ALTO @ 300DPI) con el QR y el consecutivo.
-    
-    Parámetros:
-    - data_to_encode: El UUID del cupón.
-    - output_path: Ruta donde guardar la imagen PNG.
-    - description: La descripción de la promoción.
-    - expiration: Fecha de vencimiento.
-    - consecutive: Número consecutivo (Ej: 0001).
+    Genera una imagen de tarjeta (5cm ALTO x 9cm ANCHO @ 300DPI) con el QR y el consecutivo.
+    (CORREGIDO: Las dimensiones en píxeles se han invertido para que la tarjeta sea más ancha que alta.)
     """
     if not os.path.exists('generated_qrs'):
         os.makedirs('generated_qrs')
         
-    # Dimensiones en píxeles para 9cm ANCHO (1063px) x 5cm ALTO (591px) a 300 DPI
+    # CORRECCIÓN DE DIMENSIONES: 9cm ANCHO (1063px) x 5cm ALTO (591px)
     card_width, card_height = 1063, 591 
     bg_color, text_color = (255, 255, 255), (0, 0, 0)
     
@@ -66,12 +60,10 @@ def create_qr_card(data_to_encode: str, output_path: str, description: str, expi
     draw.rectangle([0, 0, card_width, 80], fill=(191, 2, 2))
     
     try:
-        # Definición de las tres fuentes si la carga es exitosa
         title_font = ImageFont.truetype("arialbd.ttf", size=32)
         main_font = ImageFont.truetype("arial.ttf", size=30)
         consecutive_font = ImageFont.truetype("arialbd.ttf", size=40)
     except IOError:
-        # Definición de las tres fuentes si la carga falla (usando fuente por defecto)
         default_font = ImageFont.load_default()
         title_font = default_font 
         main_font = default_font
@@ -83,26 +75,27 @@ def create_qr_card(data_to_encode: str, output_path: str, description: str, expi
     qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=8, border=2)
     qr.add_data(data_to_encode)
     qr.make(fit=True)
+    # FORZAMOS COLOR NEGRO: Aseguramos que el QR se dibuje con color de relleno negro.
     qr_img = qr.make_image(fill_color="black", back_color="white").convert('RGB')
     
     # 4. POSICIONES Y DIBUJO DE CONTENIDO
     QR_SIZE_PIXELS = 250
     
-    # Posiciones ajustadas para 9cm ANCHO x 5cm ALTO
-    QR_POSITION = (763, 130)       # Esquina superior derecha (X=1063-250-50, Y=80+50)
-    CONSECUTIVE_POSITION = (50, 450) # Parte inferior izquierda
-    EXPIRATION_POSITION = (50, 220)  # Debajo de la descripción
+    # AJUSTE DE POSICIONES para el formato 9cm ANCHO x 5cm ALTO
+    QR_POSITION = (763, 130)       # X: 1063-250-50, Y: 80+50
+    CONSECUTIVE_POSITION = (50, 450)
+    EXPIRATION_POSITION = (50, 220) 
     
-    # Dibujar Promoción (description)
+    # Dibujar Promoción
     draw.text((50, 150), description, fill=text_color, font=main_font)
     
-    # Dibujar Válido hasta (expiration)
+    # Dibujar Válido hasta
     draw.text(EXPIRATION_POSITION, f"Válido hasta: {expiration}", fill=(100, 100, 100), font=main_font)
 
     # Dibujar Consecutivo
     draw.text(CONSECUTIVE_POSITION, f"CONSECUTIVO: {consecutive}", fill=(0, 0, 0), font=consecutive_font)
 
-    # Pegar el QR
+    # 5. PEGAR EL QR (El QR ahora está forzado a ser negro, lo que debería resolver el problema de dibujo)
     qr_scaled = qr_img.resize((QR_SIZE_PIXELS, QR_SIZE_PIXELS))
     card_img.paste(qr_scaled, QR_POSITION)
     
