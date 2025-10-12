@@ -189,7 +189,7 @@ def render_config_management():
             if issuers_data:
                 df_issuers = pd.DataFrame(issuers_data)
                 df_issuers.rename(columns={'issuer_name': 'Nombre'}, inplace=True)
-                st.dataframe(df_issuers, use_container_width=True)
+                st.dataframe(df_issuers, width='stretch')
             else:
                 st.info("No hay emisores registrados.")
 
@@ -228,7 +228,7 @@ def render_config_management():
         promos_data = get_promos()
         if promos_data:
             df_promos = pd.DataFrame(promos_data)
-            st.dataframe(df_promos, use_container_width=True)
+            st.dataframe(df_promos, width='stretch')
         else:
             st.info("No hay promociones registradas.")
 
