@@ -382,16 +382,18 @@ elif app_mode == "📊 Reportes (Admin)":
     report_data = db_service.get_activity_report(filter_string)
     
     # Reasignar 'df' solo si los datos son válidos
-    if report_data is not None and not report_data.empty:
+    df = pd.DataFrame() 
+    
+    # Si report_data es un DataFrame válido (no None y no está vacío), lo asignamos a df.
+    if isinstance(report_data, pd.DataFrame) and not report_data.empty:
         df = report_data
     
     st.subheader("Datos Completos")
     st.dataframe(df, width='stretch')
 
     # Métricas
-    # ... (El resto de la lógica de Métricas es correcta y ahora segura)
     if not df.empty:
-        # Aseguramos que la columna sea numérica si no lo es
+        # Aseguramos que la columna sea numérica si no lo es (para el .sum())
         df['is_redeemed'] = pd.to_numeric(df['is_redeemed'], errors='coerce').fillna(0)
         
         total_qrs = len(df)
