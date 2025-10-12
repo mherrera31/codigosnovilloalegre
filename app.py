@@ -19,6 +19,7 @@ from db_config import get_headers # Solo necesitamos get_headers de db_config
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(page_title="Sistema de QR Novillo Alegre", layout="wide")
 
+LOGO_URL = "https://placehold.co/300x100/1E3260/FFFFFF/png?text=Novillo+Alegre+QR"
 
 # ----------------------------------------
 # FUNCIONES AUXILIARES (QR y PDF)
