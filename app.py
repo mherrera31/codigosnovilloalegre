@@ -42,13 +42,14 @@ QR_SIZE_MM = 25
 
 def create_qr_card(data_to_encode: str, output_path: str, description: str, expiration: str, consecutive: str):
     """
-    Genera una imagen de tarjeta (5cm ALTO x 9cm ANCHO @ 300DPI) con el QR y el consecutivo.
-    (CORREGIDO: Las dimensiones en píxeles se han invertido para que la tarjeta sea más ancha que alta.)
+    Genera una imagen de tarjeta (9cm ANCHO x 5cm ALTO @ 300DPI) con el QR y el consecutivo.
+    (Basado en la versión original que dibujaba el QR, solo se ajusta el lienzo.)
     """
     if not os.path.exists('generated_qrs'):
         os.makedirs('generated_qrs')
         
-    # CORRECCIÓN DE DIMENSIONES: 9cm ANCHO (1063px) x 5cm ALTO (591px)
+    # CORRECCIÓN FINAL DE DIMENSIONES: 9cm ANCHO (1063px) x 5cm ALTO (591px)
+    # Al ser el ANCHO mayor que el ALTO, se respeta la orientación horizontal 5x9 cm.
     card_width, card_height = 1063, 591 
     bg_color, text_color = (255, 255, 255), (0, 0, 0)
     
@@ -75,14 +76,14 @@ def create_qr_card(data_to_encode: str, output_path: str, description: str, expi
     qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=8, border=2)
     qr.add_data(data_to_encode)
     qr.make(fit=True)
-    # FORZAMOS COLOR NEGRO: Aseguramos que el QR se dibuje con color de relleno negro.
+    # Importante: Aseguramos el color negro para el relleno
     qr_img = qr.make_image(fill_color="black", back_color="white").convert('RGB')
     
     # 4. POSICIONES Y DIBUJO DE CONTENIDO
     QR_SIZE_PIXELS = 250
     
-    # AJUSTE DE POSICIONES para el formato 9cm ANCHO x 5cm ALTO
-    QR_POSITION = (763, 130)       # X: 1063-250-50, Y: 80+50
+    # Posiciones basadas en el código que funcionaba, ajustadas al lienzo 1063x591
+    QR_POSITION = (763, 130)       
     CONSECUTIVE_POSITION = (50, 450)
     EXPIRATION_POSITION = (50, 220) 
     
@@ -95,7 +96,7 @@ def create_qr_card(data_to_encode: str, output_path: str, description: str, expi
     # Dibujar Consecutivo
     draw.text(CONSECUTIVE_POSITION, f"CONSECUTIVO: {consecutive}", fill=(0, 0, 0), font=consecutive_font)
 
-    # 5. PEGAR EL QR (El QR ahora está forzado a ser negro, lo que debería resolver el problema de dibujo)
+    # 5. PEGAR EL QR (Lógica del código original)
     qr_scaled = qr_img.resize((QR_SIZE_PIXELS, QR_SIZE_PIXELS))
     card_img.paste(qr_scaled, QR_POSITION)
     
