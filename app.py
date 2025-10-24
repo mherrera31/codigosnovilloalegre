@@ -1,4 +1,4 @@
-# app.py (VERSIÓN CORREGIDA 2/5)
+# app.py (VERSIÓN CORREGIDA 2/5 - PARA QR Y ORIENTACIÓN)
 import streamlit as st
 import auth 
 import db_service
@@ -30,40 +30,50 @@ TEMPLATE_PATH_KEY = 'current_template_path'
 if TEMPLATE_PATH_KEY not in st.session_state:
     st.session_state[TEMPLATE_PATH_KEY] = None
 
-# 9cm x 5cm en mm = 90mm x 50mm
+# --- DIMENSIONES Y CONSTANTES CLAVE ---
+# Dimensiones de la tarjeta: 9 cm de ANCHO x 5 cm de ALTO
+# A 300 DPI:
+# 9 cm * (300 px / 2.54 cm) = 1062.99 px -> ~1063 px
+# 5 cm * (300 px / 2.54 cm) = 590.55 px -> ~591 px
+
+CARD_WIDTH_PX = 1063  # Ancho en píxeles (HORIZONTAL)
+CARD_HEIGHT_PX = 591  # Alto en píxeles (VERTICAL)
+
+# Dimensiones en MM para PDF
 CARD_WIDTH_MM = 90
 CARD_HEIGHT_MM = 50
-QR_SIZE_MM = 25 
+
+QR_SIZE_PX = 250 # Tamaño del QR en píxeles
+BORDER_PX = 50   # Margen de seguridad
 
 
 # ----------------------------------------
-# FUNCIONES AUXILIARES (QR y PDF) - CORRECCIÓN DE POSICIONAMIENTO
+# FUNCIONES AUXILIARES (QR y PDF) - CORRECCIÓN DE POSICIONAMIENTO Y ORIENTACIÓN
 # ----------------------------------------
 
 def create_qr_card(data_to_encode: str, output_path: str, description: str, expiration: str, consecutive: str):
     """
     Genera una imagen de tarjeta (9cm ANCHO x 5cm ALTO @ 300DPI) con el QR y el consecutivo.
-    AJUSTE CRÍTICO: Se corrigieron las coordenadas para asegurar la visibilidad del QR.
+    AJUSTE CRÍTICO: Se corrigieron las coordenadas para asegurar la visibilidad del QR
+    y la orientación horizontal de la tarjeta.
     """
     if not os.path.exists('generated_qrs'):
         os.makedirs('generated_qrs')
         
-    # Dimensiones: 9cm ANCHO (1063px) x 5cm ALTO (591px) @ 300 DPI
-    card_width, card_height = 1063, 591 
-    bg_color, text_color = (255, 255, 255), (0, 0, 0)
-    
-    # 1. INICIALIZACIÓN DEL LIENZO Y DRAW
-    card_img = Image.new('RGB', (card_width, card_height), bg_color)
+    # Usar las dimensiones fijas para la tarjeta horizontal
+    card_img = Image.new('RGB', (CARD_WIDTH_PX, CARD_HEIGHT_PX), (255, 255, 255))
     draw = ImageDraw.Draw(card_img) 
-
-    # 2. CONFIGURACIÓN DE FUENTES Y DIBUJO DE ENCABEZADO
-    draw.rectangle([0, 0, card_width, 80], fill=(191, 2, 2))
+    
+    # 1. DIBUJO DE ENCABEZADO
+    # Banda roja superior
+    draw.rectangle([0, 0, CARD_WIDTH_PX, 80], fill=(191, 2, 2)) # Ancho completo, 80px de alto
     
     try:
         title_font = ImageFont.truetype("arialbd.ttf", size=32)
         main_font = ImageFont.truetype("arial.ttf", size=30)
         consecutive_font = ImageFont.truetype("arialbd.ttf", size=40)
     except IOError:
+        # Fallback si las fuentes no se encuentran
         default_font = ImageFont.load_default()
         title_font = default_font 
         main_font = default_font
@@ -71,27 +81,26 @@ def create_qr_card(data_to_encode: str, output_path: str, description: str, expi
         
     draw.text((30, 25), "TARJETA DE REGALO NOVILLO ALEGRE", fill=(255,255,255), font=title_font)
 
-    # 3. GENERACIÓN DEL QR
+    # 2. GENERACIÓN DEL QR
     qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=8, border=2)
     qr.add_data(data_to_encode)
     qr.make(fit=True)
     qr_img = qr.make_image(fill_color="black", back_color="white").convert('RGB')
     
-    # 4. POSICIONES Y DIBUJO DE CONTENIDO
-    QR_SIZE_PIXELS = 250
-    
-    # AJUSTE CRÍTICO: Posición para centrar el QR en la esquina derecha (9cm x 5cm)
-    # 1063 (ancho) - 250 (QR size) - 50 (padding) = 763. Se deja el 763 anterior, pero se revisa el alto.
-    # El ancho de la tarjeta es 1063, el QR debe estar en el cuadrante superior/derecho.
-    
-    # Se asegura que la posición sea visible y con padding
-    QR_POSITION = (card_width - QR_SIZE_PIXELS - 50, 150) # (763, 150)
-    CONSECUTIVE_POSITION = (50, 480) # Más abajo
-    EXPIRATION_POSITION = (50, 250) 
-    PROMO_DESCRIPTION_POSITION = (50, 150)
+    # 3. POSICIONES Y DIBUJO DE CONTENIDO
+    # El QR debe estar en la esquina superior derecha (con un margen)
+    # Posición X: Ancho de la tarjeta - Tamaño del QR - Margen
+    # Posición Y: Margen superior (para no chocar con la banda roja)
+    QR_POSITION_X = CARD_WIDTH_PX - QR_SIZE_PX - BORDER_PX 
+    QR_POSITION_Y = 100 # Después de la banda roja, con un poco de margen
+
+    # Posiciones de texto para que no se superpongan
+    PROMO_DESCRIPTION_POSITION = (BORDER_PX, 100) # Inicio en Y=100 para no chocar con la banda roja
+    EXPIRATION_POSITION = (BORDER_PX, 250) 
+    CONSECUTIVE_POSITION = (BORDER_PX, 480) 
 
     # Dibujar Promoción
-    draw.text(PROMO_DESCRIPTION_POSITION, description, fill=text_color, font=main_font)
+    draw.text(PROMO_DESCRIPTION_POSITION, description, fill=(0,0,0), font=main_font)
     
     # Dibujar Válido hasta
     draw.text(EXPIRATION_POSITION, f"Válido hasta: {expiration}", fill=(100, 100, 100), font=main_font)
@@ -99,43 +108,61 @@ def create_qr_card(data_to_encode: str, output_path: str, description: str, expi
     # Dibujar Consecutivo
     draw.text(CONSECUTIVE_POSITION, f"CONSECUTIVO: {consecutive}", fill=(0, 0, 0), font=consecutive_font)
 
-    # 5. PEGAR EL QR 
-    qr_scaled = qr_img.resize((QR_SIZE_PIXELS, QR_SIZE_PIXELS))
-    card_img.paste(qr_scaled, QR_POSITION)
+    # 4. PEGAR EL QR ESCALADO Y POSICIONADO CORRECTAMENTE
+    qr_scaled = qr_img.resize((QR_SIZE_PX, QR_SIZE_PX))
+    card_img.paste(qr_scaled, (QR_POSITION_X, QR_POSITION_Y))
     
     card_img.save(output_path)
     return output_path
     
 def generate_pdf_from_images(image_paths, output_filename):
-    """Crea un PDF a partir de una lista de imágenes en formato 9x5 cm."""
+    """Crea un PDF a partir de una lista de imágenes en formato 9x5 cm (horizontal)."""
+    # Orientación 'L' para Landscape (horizontal)
     pdf = FPDF(orientation='L', unit='mm', format=(CARD_WIDTH_MM, CARD_HEIGHT_MM))
     
     for image_path in image_paths:
         pdf.add_page()
+        # Asegúrate de que la imagen se inserte correctamente en la página
         pdf.image(image_path, x=0, y=0, w=CARD_WIDTH_MM, h=CARD_HEIGHT_MM) 
         
     pdf.output(output_filename)
     return output_filename
 
 def generate_design_template(output_filename):
-    """Genera una plantilla de PDF con espacio blanco para el arte, QR y consecutivo (9x5 cm)."""
+    """Genera una plantilla de PDF con espacio blanco para el arte, QR y consecutivo (9x5 cm horizontal)."""
+    # Orientación 'L' para Landscape (horizontal)
     pdf = FPDF(orientation='L', unit='mm', format=(CARD_WIDTH_MM, CARD_HEIGHT_MM))
     pdf.add_page()
     
     pdf.set_font("Arial", "B", 8)
-    pdf.cell(CARD_WIDTH_MM, 5, "PLANTILLA DE DISEÑO (9x5 CM)", 0, 1, 'C')
+    pdf.cell(CARD_WIDTH_MM, 5, "PLANTILLA DE DISEÑO HORIZONTAL (9x5 CM)", 0, 1, 'C')
     
-    QR_POS_X_MM = 65 
-    QR_POS_Y_MM = 15 
+    # Coordenadas en MM para el espacio del QR y consecutivo
+    # Necesitan reflejar la posición en la imagen pixelada.
+    # QR_POSITION_X_MM = (CARD_WIDTH_PX - QR_SIZE_PX - BORDER_PX) * CARD_WIDTH_MM / CARD_WIDTH_PX
+    # QR_POSITION_Y_MM = 100 * CARD_HEIGHT_MM / CARD_HEIGHT_PX
+    # QR_SIZE_MM = QR_SIZE_PX * CARD_WIDTH_MM / CARD_WIDTH_PX
+
+    # Simplificando a una posición fija en mm, acorde al diseño
+    QR_POS_X_MM = 60 # Aproximadamente en la esquina derecha
+    QR_POS_Y_MM = 15 # Un poco más abajo del borde superior
+    QR_DIM_MM = 25 # Tamaño del cuadrado QR en mm
     
     pdf.set_fill_color(255, 255, 255)
-    pdf.rect(QR_POS_X_MM, QR_POS_Y_MM, QR_SIZE_MM, QR_SIZE_MM, 'F') 
+    pdf.rect(QR_POS_X_MM, QR_POS_Y_MM, QR_DIM_MM, QR_DIM_MM, 'F') 
     
     pdf.set_text_color(150, 150, 150)
     pdf.set_font("Arial", "", 6)
     pdf.set_xy(QR_POS_X_MM, QR_POS_Y_MM + 1)
-    pdf.multi_cell(QR_SIZE_MM, 2.5, "ESPACIO QR\n2.5x2.5 cm", 0, 'C')
+    pdf.multi_cell(QR_DIM_MM, 2.5, "ESPACIO QR\n2.5x2.5 cm", 0, 'C')
     
+    # Indicador de espacio para el consecutivo
+    CONSECUTIVE_POS_X_MM = 5
+    CONSECUTIVE_POS_Y_MM = 40
+    pdf.set_xy(CONSECUTIVE_POS_X_MM, CONSECUTIVE_POS_Y_MM)
+    pdf.multi_cell(QR_POS_X_MM - CONSECUTIVE_POS_X_MM - 5, 3, "ESPACIO PARA DESCRIPCIÓN Y CONSECUTIVO", 0, 'L')
+
+
     pdf.output(output_filename)
 
 
@@ -222,15 +249,15 @@ elif app_mode == "🛠️ Creador de QRs":
     
     promos = db_service.get_promos()
     branches = db_service.get_branches()
-    types = db_service.get_types() # CAMBIO: get_types
-    scopes = db_service.get_validity_scopes() # NUEVO
-    restrictions = db_service.get_restrictions() # NUEVO
+    types = db_service.get_types() 
+    scopes = db_service.get_validity_scopes() 
+    restrictions = db_service.get_restrictions() 
 
     promo_options = {p['type_name']: p for p in promos}
     branch_options = [b['name'] for b in branches]
-    type_options = {t['type_name']: t['id'] for t in types} # CAMBIO: type_name/id
-    scope_options = {s['scope_name']: s['id'] for s in scopes} # NUEVO
-    restriction_options = {r['restriction_description']: r['id'] for r in restrictions} # NUEVO
+    type_options = {t['type_name']: t['id'] for t in types} 
+    scope_options = {s['scope_name']: s['id'] for s in scopes} 
+    restriction_options = {r['restriction_description']: r['id'] for r in restrictions} 
 
     
     # --- Interfaz de Pestañas ---
@@ -262,13 +289,13 @@ elif app_mode == "🛠️ Creador de QRs":
                     st.markdown(f"**Valor de Venta (USD):** ${sale_value_usd:,.2f}")
 
             with col2:
-                # CAMBIO: Dropdown de meses de vigencia
+                # Dropdown de meses de vigencia
                 valid_months = st.selectbox("Meses de vigencia", options=[3, 6, 9, 12], index=0)
                 
-                # CAMBIO: Selector de Tipo/Campaña
+                # Selector de Tipo/Campaña
                 selected_type_name = st.selectbox("Tipo/Campaña (Define el Uso)", options=list(type_options.keys()))
                 
-                # NUEVO: Selectores de Validez y Restricciones
+                # Selectores de Validez y Restricciones
                 allowed_branches = st.multiselect("Sucursales permitidas (dejar vacío para todas)", options=branch_options)
                 selected_scope_names = st.multiselect("Validez de Cupón (Alcances permitidos)", options=list(scope_options.keys()))
                 selected_restriction_names = st.multiselect("Restricciones Aplicadas", options=list(restriction_options.keys()))
@@ -278,7 +305,7 @@ elif app_mode == "🛠️ Creador de QRs":
             submitted = st.form_submit_button("🚀 Generar Tarjetas", type="primary")
 
         if submitted:
-            type_id = type_options.get(selected_type_name) # CAMBIO: type_id
+            type_id = type_options.get(selected_type_name) 
             user_id = st.session_state.get('user_id')
             
             # Obtener IDs de las selecciones
@@ -290,17 +317,16 @@ elif app_mode == "🛠️ Creador de QRs":
             else:
                 st.success(f"Generando {count} tarjeta(s)...")
                 
-                # LLAMADA CORREGIDA A LA FUNCIÓN DE BATCH
                 coupon_entries = db_service.create_coupon_batch(
                     count=count,
-                    promo_data=selected_promo, # Se pasa el objeto completo
+                    promo_data=selected_promo, 
                     value_crc=value_crc,
                     value_usd=value_usd,
                     type_id=type_id,
-                    months_valid=valid_months, # Meses en lugar de días
+                    months_valid=valid_months, 
                     branch_names=allowed_branches,
-                    scope_ids=selected_scope_ids, # NUEVO
-                    restriction_ids=selected_restriction_ids, # NUEVO
+                    scope_ids=selected_scope_ids, 
+                    restriction_ids=selected_restriction_ids, 
                     user_id=user_id
                 )
                 
@@ -315,12 +341,13 @@ elif app_mode == "🛠️ Creador de QRs":
                         
                         output_path = os.path.join('generated_qrs', f"{unique_id}.png")
                         
-                        # LLAMADA CORREGIDA CON 5 ARGUMENTOS
+                        # LLAMADA A LA FUNCIÓN CORREGIDA create_qr_card
                         create_qr_card(unique_id, output_path, selected_promo['description'], expiration, consecutive)
                         generated_image_paths.append(output_path)
                         
                     # Sección de Descarga de Lote PDF
                     st.subheader("⬇️ Descargar Lote Completo")
+                    # Se asegura la orientación del PDF también
                     pdf_path = generate_pdf_from_images(generated_image_paths, f"lote_tarjetas_{coupon_entries[0]['batch_id']}.pdf")
 
                     with open(pdf_path, "rb") as pdf_file:
@@ -332,16 +359,16 @@ elif app_mode == "🛠️ Creador de QRs":
                         )
 
     # ----------------------------------------
-    # GESTIÓN Y DESCARGA DE PLANTILLAS DE DISEÑO
+    # GESTIÓN Y DESCARGA DE PLANTILLAS DE DISEÑO (Actualizada para orientación horizontal)
     # ----------------------------------------
     with tab_template:
         st.header("Gestión de Plantilla para Arte y Diseño")
         
         # 1. DESCARGA DE LA GUÍA DE ESPACIOS
         st.subheader("1. Guía de Espacios (Para el Diseñador)")
-        st.markdown("Use esta guía para crear su arte y dejar el espacio libre para el QR y el consecutivo.")
+        st.markdown("Use esta guía para crear su arte y dejar el espacio libre para el QR y el consecutivo. **Orientación Horizontal (9x5 cm).**")
         
-        BLANK_PDF_PATH = os.path.join(TEMPLATE_DIR, "plantilla_guia_9x5.pdf")
+        BLANK_PDF_PATH = os.path.join(TEMPLATE_DIR, "plantilla_guia_horizontal_9x5.pdf")
         if st.button("Descargar Guía PDF (9x5 cm)", key="download_guide"):
             generate_design_template(BLANK_PDF_PATH)
             with open(BLANK_PDF_PATH, "rb") as pdf_file:
@@ -358,7 +385,7 @@ elif app_mode == "🛠️ Creador de QRs":
         st.subheader("2. Subir Plantilla de Arte (PDF Terminado)")
         
         uploaded_file = st.file_uploader(
-            "Suba el PDF de Diseño (Arte Terminado, 9x5cm) para usar como fondo", 
+            "Suba el PDF de Diseño (Arte Terminado, 9x5cm, Horizontal) para usar como fondo", 
             type="pdf", 
             key="template_uploader"
         )
