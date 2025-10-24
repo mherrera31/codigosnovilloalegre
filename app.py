@@ -1,4 +1,4 @@
-# app.py (VERSIÓN CORREGIDA - Descarga ZIP)
+# app.py (VERSIÓN CORREGIDA - Guía JPG / Plantilla PNG)
 import streamlit as st
 import auth 
 import db_service
@@ -13,7 +13,7 @@ import os
 from datetime import datetime, timedelta
 import pandas as pd
 from pyzbar.pyzbar import decode
-from fpdf import FPDF 
+from fpdf import FPDF # Sigue siendo necesario para la plantilla PDF (aunque la cambiamos a JPG)
 from db_config import get_headers 
 
 # --- ¡NUEVOS IMPORTS PARA ZIP! ---
@@ -61,17 +61,31 @@ BORDER_PX = 50   # Margen de seguridad
 def create_qr_card(data_to_encode: str, output_path: str, description: str, expiration: str, consecutive: str):
     """
     Genera una imagen de tarjeta (9cm ANCHO x 5cm ALTO @ 300DPI) con el QR y el consecutivo.
-    AJUSTE CRÍTICO: Se corrigieron las coordenadas para asegurar la visibilidad del QR
-    y la orientación horizontal de la tarjeta.
+    ¡¡MODIFICADO!!: Ahora usa la plantilla PNG subida si existe.
     """
     
-    # Usar las dimensiones fijas para la tarjeta horizontal
-    card_img = Image.new('RGB', (CARD_WIDTH_PX, CARD_HEIGHT_PX), (255, 255, 255))
+    # ¡¡CAMBIO CLAVE!!: Cargar la plantilla PNG si existe, si no, crear fondo blanco.
+    template_path = st.session_state.get(TEMPLATE_PATH_KEY)
+    if template_path and os.path.exists(template_path):
+        try:
+            card_img = Image.open(template_path).convert('RGB')
+            # Asegurarse de que la plantilla tenga el tamaño correcto
+            if card_img.size != (CARD_WIDTH_PX, CARD_HEIGHT_PX):
+                st.warning(f"La plantilla {os.path.basename(template_path)} no tiene el tamaño correcto (1063x591px). Se redimensionará, pero podría verse distorsionada.")
+                card_img = card_img.resize((CARD_WIDTH_PX, CARD_HEIGHT_PX))
+        except Exception as e:
+            st.error(f"Error al cargar la plantilla: {e}. Se usará fondo blanco.")
+            card_img = Image.new('RGB', (CARD_WIDTH_PX, CARD_HEIGHT_PX), (255, 255, 255))
+    else:
+        # Usar fondo blanco por defecto si no hay plantilla
+        card_img = Image.new('RGB', (CARD_WIDTH_PX, CARD_HEIGHT_PX), (255, 255, 255))
+    
     draw = ImageDraw.Draw(card_img) 
     
     # 1. DIBUJO DE ENCABEZADO
-    # Banda roja superior
-    draw.rectangle([0, 0, CARD_WIDTH_PX, 80], fill=(191, 2, 2)) # Ancho completo, 80px de alto
+    # Si no se usa plantilla, dibujar la banda roja.
+    if not template_path:
+        draw.rectangle([0, 0, CARD_WIDTH_PX, 80], fill=(191, 2, 2)) # Ancho completo, 80px de alto
     
     try:
         title_font = ImageFont.truetype("arialbd.ttf", size=32)
@@ -83,8 +97,10 @@ def create_qr_card(data_to_encode: str, output_path: str, description: str, expi
         title_font = default_font 
         main_font = default_font
         consecutive_font = default_font
-        
-    draw.text((30, 25), "TARJETA DE REGALO NOVILLO ALEGRE", fill=(255,255,255), font=title_font)
+    
+    # Si no se usa plantilla, dibujar el título.
+    if not template_path:
+        draw.text((30, 25), "TARJETA DE REGALO NOVILLO ALEGRE", fill=(255,255,255), font=title_font)
 
     # 2. GENERACIÓN DEL QR
     qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=8, border=2)
@@ -93,18 +109,24 @@ def create_qr_card(data_to_encode: str, output_path: str, description: str, expi
     qr_img = qr.make_image(fill_color="black", back_color="white").convert('RGB')
     
     # 3. POSICIONES Y DIBUJO DE CONTENIDO
-    # El QR debe estar en la esquina superior derecha (con un margen)
-    # Posición X: Ancho de la tarjeta - Tamaño del QR - Margen
-    # Posición Y: Margen superior (para no chocar con la banda roja)
-    
-    # ¡¡CORRECCIÓN CLAVE!!
+    # Posición del QR (Esquina superior derecha)
     QR_POSITION_X = CARD_WIDTH_PX - QR_SIZE_PX - BORDER_PX # (1063 - 250 - 50 = 763)
     QR_POSITION_Y = 100 # (Debajo de la banda roja de 80px)
 
-    # Posiciones de texto para que no se superpongan
-    PROMO_DESCRIPTION_POSITION = (BORDER_PX, 150) # (50, 150)
-    EXPIRATION_POSITION = (BORDER_PX, 250) # (50, 250)
-    CONSECUTIVE_POSITION = (BORDER_PX, 480) # (50, 480) - Cerca del fondo
+    # Posiciones de texto (Ajustadas para plantilla o fondo blanco)
+    # Si hay plantilla, asumimos que el diseñador dejó espacio para esto.
+    # Si no hay plantilla, las posiciones son fijas.
+    
+    if template_path:
+        # Posiciones asumidas para la plantilla (esquina inferior izquierda)
+        PROMO_DESCRIPTION_POSITION = (BORDER_PX, 400) 
+        EXPIRATION_POSITION = (BORDER_PX, 440) 
+        CONSECUTIVE_POSITION = (BORDER_PX, 480) 
+    else:
+        # Posiciones estándar sobre fondo blanco
+        PROMO_DESCRIPTION_POSITION = (BORDER_PX, 150) # (50, 150)
+        EXPIRATION_POSITION = (BORDER_PX, 250) # (50, 250)
+        CONSECUTIVE_POSITION = (BORDER_PX, 480) # (50, 480) - Cerca del fondo
 
     # Dibujar Promoción
     draw.text(PROMO_DESCRIPTION_POSITION, description, fill=(0,0,0), font=main_font)
@@ -116,7 +138,6 @@ def create_qr_card(data_to_encode: str, output_path: str, description: str, expi
     draw.text(CONSECUTIVE_POSITION, f"CONSECUTIVO: {consecutive}", fill=(0, 0, 0), font=consecutive_font)
 
     # 4. PEGAR EL QR ESCALADO Y POSICIONADO CORRECTAMENTE
-    # ¡¡ESTA ES LA LÍNEA QUE DIBUJA EL QR!!
     qr_scaled = qr_img.resize((QR_SIZE_PX, QR_SIZE_PX))
     card_img.paste(qr_scaled, (QR_POSITION_X, QR_POSITION_Y))
     
@@ -125,39 +146,48 @@ def create_qr_card(data_to_encode: str, output_path: str, description: str, expi
     return output_path
     
 # =========================================================================
-# FUNCIÓN DE PDF ELIMINADA (generate_pdf_from_images ya no se necesita)
+# FUNCIÓN DE GUÍA (AHORA GENERA JPG)
 # =========================================================================
 
 def generate_design_template(output_filename):
-    """Genera una plantilla de PDF con espacio blanco para el arte, QR y consecutivo (9x5 cm horizontal)."""
-    # ¡¡CORRECCIÓN CLAVE!! Orientación 'L' para Landscape (horizontal)
-    pdf = FPDF(orientation='L', unit='mm', format=(CARD_WIDTH_MM, CARD_HEIGHT_MM))
-    pdf.add_page()
-    
-    pdf.set_font("Arial", "B", 8)
-    pdf.cell(CARD_WIDTH_MM, 5, "PLANTILLA DE DISEÑO HORIZONTAL (9x5 CM)", 0, 1, 'C')
-    
-    # Coordenadas en MM para el espacio del QR
-    QR_POS_X_MM = 60 
-    QR_POS_Y_MM = 15 
-    QR_DIM_MM = 25 
-    
-    pdf.set_fill_color(255, 255, 255)
-    pdf.rect(QR_POS_X_MM, QR_POS_Y_MM, QR_DIM_MM, QR_DIM_MM, 'F') 
-    
-    pdf.set_text_color(150, 150, 150)
-    pdf.set_font("Arial", "", 6)
-    pdf.set_xy(QR_POS_X_MM, QR_POS_Y_MM + 1)
-    pdf.multi_cell(QR_DIM_MM, 2.5, "ESPACIO QR\n2.5x2.5 cm", 0, 'C')
-    
-    # Indicador de espacio para el consecutivo
-    CONSECUTIVE_POS_X_MM = 5
-    CONSECUTIVE_POS_Y_MM = 40
-    pdf.set_xy(CONSECUTIVE_POS_X_MM, CONSECUTIVE_POS_Y_MM)
-    pdf.multi_cell(QR_POS_X_MM - CONSECUTIVE_POS_X_MM - 5, 3, "ESPACIO PARA DESCRIPCIÓN Y CONSECUTIVO", 0, 'L')
+    """
+    Genera una plantilla de GUÍA en formato JPG (9x5 cm horizontal).
+    """
+    # Crear imagen base
+    img = Image.new('RGB', (CARD_WIDTH_PX, CARD_HEIGHT_PX), (230, 230, 230)) # Fondo gris claro
+    draw = ImageDraw.Draw(img)
 
+    try:
+        title_font = ImageFont.truetype("arialbd.ttf", size=40)
+        main_font = ImageFont.truetype("arial.ttf", size=24)
+    except IOError:
+        title_font = main_font = ImageFont.load_default()
 
-    pdf.output(output_filename)
+    # Título de la guía
+    draw.text((BORDER_PX, BORDER_PX), "GUÍA DE DISEÑO HORIZONTAL (1063x591 px)", fill=(0,0,0), font=title_font)
+
+    # --- Definir zonas ---
+    # Zona del QR (Esquina superior derecha)
+    QR_POS_X = CARD_WIDTH_PX - QR_SIZE_PX - BORDER_PX
+    QR_POS_Y = 100
+    draw.rectangle(
+        [QR_POS_X, QR_POS_Y, QR_POS_X + QR_SIZE_PX, QR_POS_Y + QR_SIZE_PX], 
+        outline=(255, 0, 0), width=3
+    )
+    draw.text((QR_POS_X + 10, QR_POS_Y + 10), "ESPACIO PARA QR (250x250 px)", fill=(255,0,0), font=main_font)
+
+    # Zona de Textos (Esquina inferior izquierda)
+    TEXT_POS_X = BORDER_PX
+    TEXT_POS_Y = 400
+    draw.rectangle(
+        [TEXT_POS_X, TEXT_POS_Y, CARD_WIDTH_PX - BORDER_PX, CARD_HEIGHT_PX - BORDER_PX], 
+        outline=(0, 0, 255), width=3
+    )
+    draw.text((TEXT_POS_X + 10, TEXT_POS_Y + 10), "ESPACIO RECOMENDADO PARA TEXTOS", fill=(0,0,255), font=main_font)
+    draw.text((TEXT_POS_X + 10, TEXT_POS_Y + 40), "(Descripción, Validez, Consecutivo)", fill=(0,0,255), font=main_font)
+
+    # Guardar como JPG
+    img.save(output_filename, "JPEG", quality=95)
 
 
 # ----------------------------------------
@@ -373,7 +403,7 @@ elif app_mode == "🛠️ Creador de QRs":
 
 
     # ----------------------------------------
-    # GESTIÓN Y DESCARGA DE PLANTILLAS DE DISEÑO (Actualizada para orientación horizontal)
+    # GESTIÓN Y DESCARGA DE PLANTILLAS DE DISEÑO (Actualizada para JPG y PNG)
     # ----------------------------------------
     with tab_template:
         st.header("Gestión de Plantilla para Arte y Diseño")
@@ -382,30 +412,33 @@ elif app_mode == "🛠️ Creador de QRs":
         st.subheader("1. Guía de Espacios (Para el Diseñador)")
         st.markdown("Use esta guía para crear su arte y dejar el espacio libre para el QR y el consecutivo. **Orientación Horizontal (9x5 cm).**")
         
-        BLANK_PDF_PATH = os.path.join(TEMPLATE_DIR, "plantilla_guia_horizontal_9x5.pdf")
-        if st.button("Descargar Guía PDF (9x5 cm)", key="download_guide"):
-            generate_design_template(BLANK_PDF_PATH)
-            with open(BLANK_PDF_PATH, "rb") as pdf_file:
+        # ¡¡CAMBIO A JPG!!
+        BLANK_JPG_PATH = os.path.join(TEMPLATE_DIR, "plantilla_guia_horizontal_9x5.jpg")
+        if st.button("Descargar Guía JPG (9x5 cm)", key="download_guide"):
+            generate_design_template(BLANK_JPG_PATH)
+            with open(BLANK_JPG_PATH, "rb") as file:
                 st.download_button(
-                    label="Descargar Guía de Diseño (PDF)",
-                    data=pdf_file,
-                    file_name=BLANK_PDF_PATH,
-                    mime="application/pdf"
+                    label="Descargar Guía de Diseño (JPG)",
+                    data=file,
+                    file_name=os.path.basename(BLANK_JPG_PATH),
+                    mime="image/jpeg" # ¡¡CAMBIO DE MIME-TYPE!!
                 )
     
         st.markdown("---")
         
-        # 2. CARGA DE LA PLANTILLA DE ARTE (PDF)
-        st.subheader("2. Subir Plantilla de Arte (PDF Terminado)")
+        # 2. CARGA DE LA PLANTILLA DE ARTE (PNG)
+        st.subheader("2. Subir Plantilla de Arte (PNG Terminado)")
         
+        # ¡¡CAMBIO A PNG!!
         uploaded_file = st.file_uploader(
-            "Suba el PDF de Diseño (Arte Terminado, 9x5cm, Horizontal) para usar como fondo", 
-            type="pdf", 
+            "Suba el PNG de Diseño (Arte Terminado, 1063x591px, Horizontal) para usar como fondo", 
+            type="png", 
             key="template_uploader"
         )
         
         if uploaded_file is not None:
-            template_filename = "plantilla_arte_activa.pdf"
+            # ¡¡CAMBIO A PNG!!
+            template_filename = "plantilla_arte_activa.png"
             save_path = os.path.join(TEMPLATE_DIR, template_filename)
             
             with open(save_path, "wb") as f:
