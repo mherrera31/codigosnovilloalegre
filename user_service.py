@@ -1,19 +1,18 @@
-# user_service.py
+# user_service.py (VERSIÓN CORREGIDA 4/5 - Enfocado en errores de creación)
 import requests 
 import streamlit as st
 import pandas as pd
 import uuid
-import db_service # Necesario para obtener listas de roles/sucursales
+import db_service 
 import json
 from db_config import AUTH_ENDPOINT, POSTGREST_ENDPOINT, get_headers, SUPABASE_KEY 
-import auth # Necesario para obtener el token del admin logueado
+import auth 
 
 # --- Funciones de Lectura y Conversión ---
 
 def get_all_users_with_branches():
     """Obtiene todos los usuarios con sus roles y sucursales asignadas usando PostgREST."""
     
-    # Debe usar el token de la sesión del Admin para la autorización
     token = st.session_state.get('token')
     
     # Consulta: Obtener profile, role_name, y branch_name a través de JOINs
@@ -27,14 +26,13 @@ def get_all_users_with_branches():
         
         if data:
             df = pd.DataFrame(data)
-            # Aplanar los datos de relación (porque Supabase devuelve objetos anidados)
+            # Aplanar los datos de relación 
             df['role_name'] = df['roles'].apply(lambda x: x['role_name'] if isinstance(x, dict) and x else None)
             df['branch_name'] = df['branches'].apply(lambda x: x['name'] if isinstance(x, dict) and x else 'N/A')
             return df[['id', 'username', 'email', 'role_name', 'branch_name', 'phone_number']]
         return pd.DataFrame()
         
     except Exception as e:
-        # En el caso de "No API key found" u otro error
         st.error(f"Error al obtener usuarios. Asegúrese de tener el perfil Admin configurado. Error: {e}")
         return pd.DataFrame()
 
@@ -61,7 +59,7 @@ def create_user_profile(email: str, username: str, password: str, role_id: int, 
         
         auth_data = auth_response.json()
         user_data = auth_data.get('user', auth_data) 
-        user_id = user_data.get('id') # ID del usuario recién creado
+        user_id = user_data.get('id') 
         
         if not user_id:
             raise Exception("No se pudo obtener el ID del usuario recién creado.")
@@ -84,14 +82,20 @@ def create_user_profile(email: str, username: str, password: str, role_id: int, 
         )
         profile_response.raise_for_status()
 
-        st.success(f"Usuario **{username}** ({email}) creado exitosamente con la contraseña proporcionada.")
+        st.success(f"Usuario **{username}** ({email}) creado exitosamente. La contraseña debe tener al menos 6 caracteres según Supabase.")
         return True
 
     except requests.exceptions.HTTPError as err:
-        error_data = err.response.json()
-        error_msg = error_data.get('msg', error_data.get('message', str(err)))
+        try:
+            error_data = err.response.json()
+            error_msg = error_data.get('msg', error_data.get('message', str(err)))
+        except:
+            error_msg = str(err)
+
         if 'email address is already taken' in error_msg:
              st.error("Error: Este correo electrónico ya está registrado.")
+        elif 'Password should be at least 6 characters' in error_msg:
+             st.error("Error: La contraseña inicial debe tener al menos 6 caracteres.")
         else:
             st.error(f"Error al crear usuario: {error_msg}")
         return False
@@ -112,7 +116,6 @@ def render_user_management():
 
     st.header("🔑 Módulo de Gestión de Usuarios")
     
-    # Obtener datos maestros (usa db_service para obtener roles y branches)
     roles = db_service.get_roles()
     branches = db_service.get_branches()
     
@@ -129,11 +132,10 @@ def render_user_management():
                 input_username = st.text_input("Nombre Completo")
                 input_email = st.text_input("Correo Electrónico (será el nombre de usuario)")
                 # Contraseña Manual
-                input_password = st.text_input("Contraseña Inicial", type="password") 
+                input_password = st.text_input("Contraseña Inicial (Mínimo 6 caracteres)", type="password") 
             with col2:
                 selected_role_name = st.selectbox("Rol", options=list(role_options.keys()))
                 
-                # Mostrar selector de sucursal solo para roles de Creator y Cashier
                 selected_branch_name = None
                 if selected_role_name in ["Creator", "Cashier"]:
                     if branch_options:
@@ -147,10 +149,12 @@ def render_user_management():
                 role_id = role_options.get(selected_role_name)
                 branch_id = branch_options.get(selected_branch_name) if selected_branch_name else None
                 
-                # Validación consolidada
                 if input_email and input_username and role_id and input_password: 
-                    if create_user_profile(input_email, input_username, input_password, role_id, branch_id):
-                        st.rerun()
+                    if len(input_password) < 6:
+                        st.error("La contraseña debe tener al menos 6 caracteres.")
+                    else:
+                        if create_user_profile(input_email, input_username, input_password, role_id, branch_id):
+                            st.rerun()
                 else:
                     st.warning("El nombre, correo, rol y contraseña son obligatorios.")
 
@@ -158,7 +162,6 @@ def render_user_management():
         st.subheader("Lista de Usuarios del Sistema")
         df_users = get_all_users_with_branches()
         if not df_users.empty:
-            # Uso la sintaxis corregida para evitar advertencias de Streamlit
             st.dataframe(df_users, width='stretch')
         else:
             st.info("No hay usuarios registrados o el perfil Admin no tiene permisos.")
