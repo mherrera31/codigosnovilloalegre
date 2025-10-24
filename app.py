@@ -1,4 +1,4 @@
-# app.py (VERSIÓN CORREGIDA - Guía JPG / Plantilla PNG)
+# app.py (VERSIÓN CORREGIDA - Nuevos Filtros en Reportes)
 import streamlit as st
 import auth 
 import db_service
@@ -13,7 +13,7 @@ import os
 from datetime import datetime, timedelta
 import pandas as pd
 from pyzbar.pyzbar import decode
-from fpdf import FPDF # Sigue siendo necesario para la plantilla PDF (aunque la cambiamos a JPG)
+from fpdf import FPDF 
 from db_config import get_headers 
 
 # --- ¡NUEVOS IMPORTS PARA ZIP! ---
@@ -476,15 +476,42 @@ elif app_mode == "📊 Reportes (Admin)":
     st.sidebar.header("Filtros de Reporte")
     
     # --- OBTENER DATOS DE SUPABASE ---
+    # ¡¡NUEVO!! Cargar datos para los nuevos filtros
+    types = db_service.get_types()
+    type_options = {t['type_name']: t['id'] for t in types}
+    all_types = {"Todos": None}
+    all_types.update(type_options)
+
     branches = db_service.get_branches()
-    branch_names = [b['name'] for b in branches]
+    branch_options = {b['name']: b['id'] for b in branches}
+    all_branches = {"Todas": None}
+    all_branches.update(branch_options)
+
+    # --- NUEVOS FILTROS ---
+    selected_type_name = st.sidebar.selectbox("Filtrar por Tipo/Campaña", options=list(all_types.keys()))
+    selected_type_id = all_types.get(selected_type_name)
     
-    selected_status = st.sidebar.selectbox("Estado", ["Todos", "Canjeados", "No Canjeados"])
-    start_date = st.sidebar.date_input("Fecha de creación (desde)", value=None)
-    end_date = st.sidebar.date_input("Fecha de creación (hasta)", value=None)
+    selected_branch_name = st.sidebar.selectbox("Filtrar por Sucursal de Canje", options=list(all_branches.keys()))
+    selected_branch_id = all_branches.get(selected_branch_name)
+
+    selected_status = st.sidebar.selectbox("Filtrar por Estado", ["Todos", "Canjeados", "No Canjeados"])
+    
+    col1_date, col2_date = st.sidebar.columns(2)
+    with col1_date:
+        start_date = st.date_input("Fecha de creación (desde)", value=None)
+    with col2_date:
+        end_date = st.date_input("Fecha de creación (hasta)", value=None)
 
     # Lógica para construir el filtro de PostgREST
     filters = []
+    
+    # ¡¡NUEVO!! Aplicar filtros
+    if selected_type_id:
+        filters.append(f"batch_id.type_id=eq.{selected_type_id}")
+        
+    if selected_branch_id:
+        filters.append(f"redemption_branch_id=eq.{selected_branch_id}")
+    
     if selected_status == "Canjeados":
         filters.append("is_redeemed=eq.true")
     elif selected_status == "No Canjeados":
@@ -510,7 +537,8 @@ elif app_mode == "📊 Reportes (Admin)":
         df = report_data
     
     st.subheader("Datos Completos")
-    st.dataframe(df, width='stretch')
+    # Mostrar el dataframe con todas las nuevas columnas
+    st.dataframe(df, use_container_width=True)
 
     # Métricas
     if not df.empty:
