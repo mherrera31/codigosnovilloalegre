@@ -1,4 +1,4 @@
-# app.py (VERSIÓN CORREGIDA - Usando JPG en lugar de PNG)
+# app.py (VERSIÓN FINAL - Descarga JPG Individual)
 import streamlit as st
 import auth 
 import db_service
@@ -119,18 +119,9 @@ def create_qr_card(data_to_encode: str, output_path: str, description: str, expi
     card_img.save(output_path, "JPEG", quality=95)
     return output_path
     
-def generate_pdf_from_images(image_paths, output_filename):
-    """Crea un PDF a partir de una lista de imágenes en formato 9x5 cm (horizontal)."""
-    # ¡¡CORRECCIÓN CLAVE!! Orientación 'L' para Landscape (horizontal)
-    pdf = FPDF(orientation='L', unit='mm', format=(CARD_WIDTH_MM, CARD_HEIGHT_MM))
-    
-    for image_path in image_paths:
-        pdf.add_page()
-        # FPDF soporta JPG y PNG, ahora usará el path .jpg
-        pdf.image(image_path, x=0, y=0, w=CARD_WIDTH_MM, h=CARD_HEIGHT_MM) 
-        
-    pdf.output(output_filename)
-    return output_filename
+# =========================================================================
+# FUNCIÓN DE PDF ELIMINADA (generate_pdf_from_images ya no se necesita)
+# =========================================================================
 
 def generate_design_template(output_filename):
     """Genera una plantilla de PDF con espacio blanco para el arte, QR y consecutivo (9x5 cm horizontal)."""
@@ -332,32 +323,45 @@ elif app_mode == "🛠️ Creador de QRs":
                     st.balloons()
                     generated_image_paths = []
                     
+                    # Loop 1: Generar todas las imágenes JPG
                     for entry in coupon_entries:
                         unique_id = entry['id']
                         consecutive = str(entry['consecutive']).zfill(4) 
                         expiration = entry['expiration_date']
                         
-                        # =======================================================
                         # ¡¡CAMBIO CLAVE A JPG!!
                         output_path = os.path.join('generated_qrs', f"{unique_id}.jpg")
-                        # =======================================================
                         
                         # LLAMADA A LA FUNCIÓN CORREGIDA create_qr_card
                         create_qr_card(unique_id, output_path, selected_promo['description'], expiration, consecutive)
-                        generated_image_paths.append(output_path)
+                        # Guardar el path Y el consecutivo para el botón de descarga
+                        generated_image_paths.append((output_path, consecutive))
                         
-                    # Sección de Descarga de Lote PDF
-                    st.subheader("⬇️ Descargar Lote Completo")
-                    # Se asegura la orientación del PDF también
-                    pdf_path = generate_pdf_from_images(generated_image_paths, f"lote_tarjetas_{coupon_entries[0]['batch_id']}.pdf")
+                    
+                    # =======================================================
+                    # ¡¡CAMBIO CLAVE: Sección de Descarga JPG!!
+                    # =======================================================
+                    st.subheader("⬇️ Descargar Tarjetas Individuales (JPG)")
+                    st.info(f"Se generaron {len(generated_image_paths)} tarjetas.")
 
-                    with open(pdf_path, "rb") as pdf_file:
-                        st.download_button(
-                            label="Descargar PDF con todas las tarjetas",
-                            data=pdf_file,
-                            file_name=os.path.basename(pdf_path),
-                            mime="application/pdf"
-                        )
+                    # Usar columnas para mostrar los botones de descarga
+                    cols = st.columns(3) 
+                    
+                    for idx, (path, consecutive) in enumerate(generated_image_paths):
+                        with open(path, "rb") as file:
+                            # Colocar cada botón en una columna (ciclo 0, 1, 2, 0, 1, 2...)
+                            cols[idx % 3].download_button(
+                                label=f"Descargar Consecutivo {consecutive}",
+                                data=file,
+                                file_name=os.path.basename(path),
+                                mime="image/jpeg", # Mime-type para JPG
+                                key=f"jpg_dl_{consecutive}" # Clave única
+                            )
+                    
+                    # =======================================================
+                    # SECCIÓN DE PDF ELIMINADA
+                    # =======================================================
+
 
     # ----------------------------------------
     # GESTIÓN Y DESCARGA DE PLANTILLAS DE DISEÑO (Actualizada para orientación horizontal)
