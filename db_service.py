@@ -1,4 +1,4 @@
-# db_service.py (VERSIÓN FINAL Y COMPLETA)
+# db_service.py (VERSIÓN CORREGIDA - REPORTES)
 import requests
 import streamlit as st
 import pandas as pd
@@ -365,12 +365,13 @@ def get_activity_report(filters: str):
     """Obtiene el reporte de actividad de cupones con joins para mostrar en la tabla."""
     token = st.session_state.get('token')
     
-    # Sintaxis de SELECT corregida para usar 'type_id'
+    # ¡¡CAMBIO!!: Se expande el SELECT para traer toda la info solicitada
     select_params = (
-        "id,consecutive,is_redeemed,redemption_date,invoice_number,creation_date,"
-        "batch_id(type:types(type_name))," # CAMBIO: issuer -> type, issuers -> types
-        "redemption_branch_id(name),"
-        "redeemed_by_user_id(username)"
+        "id,consecutive,is_redeemed,redemption_date,invoice_number,creation_date,expiration_date,"
+        "base_value_colones,base_value_dolares,"
+        "batch:batch_id(*,type:types(type_name))," # Trae todo de batches, y anida el tipo
+        "branch:redemption_branch_id(name),"
+        "user:redeemed_by_user_id(username)"
     )
     
     select_params = select_params.replace(' ', '')
@@ -393,21 +394,42 @@ def get_activity_report(filters: str):
         if data:
             df = pd.DataFrame(data)
             
-            # Aplanamiento de datos
-            df['Redemption Branch'] = df['redemption_branch_id'].apply(lambda x: x['name'] if x else 'N/A')
-            df['Redeemed By'] = df['redeemed_by_user_id'].apply(lambda x: x['username'] if x else 'N/A')
-            # CAMBIO: Mapeo de 'type' en lugar de 'issuer'
-            df['Type/Campaign'] = df['batch_id'].apply(lambda x: x['type']['type_name'] if x and x['type'] else 'N/A')
+            # Aplanamiento de datos (¡¡ACTUALIZADO!!)
+            df['Sucursal Canje'] = df['branch'].apply(lambda x: x['name'] if x else 'N/A')
+            df['Canjeado Por'] = df['user'].apply(lambda x: x['username'] if x else 'N/A')
+            df['Tipo/Campaña'] = df['batch'].apply(lambda x: x['type']['type_name'] if (x and x.get('type')) else 'N/A')
+            
+            # Nuevas columnas del Lote
+            df['Lote (Batch Name)'] = df['batch'].apply(lambda x: x['batch_name'] if x else 'N/A')
+            df['Venta Lote (CRC)'] = df['batch'].apply(lambda x: x['total_sale_value_crc'] if x else 0.0)
+            df['Ref. Lote (CRC)'] = df['batch'].apply(lambda x: x['total_ref_value_crc'] if x else 0.0)
             
             df['is_redeemed'] = df['is_redeemed'].astype(bool)
 
-            return df[['id', 'consecutive', 'is_redeemed', 'redemption_date', 'invoice_number', 'Redemption Branch', 'Redeemed By', 'Type/Campaign']]
+            # Reordenar columnas para el reporte
+            column_order = [
+                'id', 'consecutive', 'is_redeemed', 'creation_date', 'expiration_date',
+                'base_value_colones', 'base_value_dolares', 
+                'Tipo/Campaña', 'Lote (Batch Name)', 'Venta Lote (CRC)', 'Ref. Lote (CRC)',
+                'redemption_date', 'invoice_number', 'Sucursal Canje', 'Canjeado Por'
+            ]
+            
+            # Filtrar solo las columnas que existen en el DF (por si alguna falla)
+            final_columns = [col for col in column_order if col in df.columns]
+            return df[final_columns]
         
         return pd.DataFrame()
         
+    # ¡¡CAMBIO CRÍTICO!!: Mostrar el error en la app en lugar de fallar en silencio
     except requests.exceptions.HTTPError as e:
+        try:
+            error_msg = e.response.json().get('message', str(e))
+        except:
+            error_msg = str(e)
+        st.error(f"Error al cargar el reporte (HTTP): {error_msg}")
         return pd.DataFrame()
     except Exception as e:
+        st.error(f"Error inesperado al cargar el reporte: {e}")
         return pd.DataFrame()
         
 
