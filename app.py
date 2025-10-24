@@ -1,4 +1,4 @@
-# app.py (VERSIÓN CORREGIDA 2/5 - PARA QR Y ORIENTACIÓN)
+# app.py (VERSIÓN CORREGIDA - Usando JPG en lugar de PNG)
 import streamlit as st
 import auth 
 import db_service
@@ -115,7 +115,8 @@ def create_qr_card(data_to_encode: str, output_path: str, description: str, expi
     qr_scaled = qr_img.resize((QR_SIZE_PX, QR_SIZE_PX))
     card_img.paste(qr_scaled, (QR_POSITION_X, QR_POSITION_Y))
     
-    card_img.save(output_path)
+    # CAMBIO: Guardar como JPG de alta calidad
+    card_img.save(output_path, "JPEG", quality=95)
     return output_path
     
 def generate_pdf_from_images(image_paths, output_filename):
@@ -125,7 +126,7 @@ def generate_pdf_from_images(image_paths, output_filename):
     
     for image_path in image_paths:
         pdf.add_page()
-        # Asegúrate de que la imagen se inserte correctamente en la página
+        # FPDF soporta JPG y PNG, ahora usará el path .jpg
         pdf.image(image_path, x=0, y=0, w=CARD_WIDTH_MM, h=CARD_HEIGHT_MM) 
         
     pdf.output(output_filename)
@@ -336,7 +337,10 @@ elif app_mode == "🛠️ Creador de QRs":
                         consecutive = str(entry['consecutive']).zfill(4) 
                         expiration = entry['expiration_date']
                         
-                        output_path = os.path.join('generated_qrs', f"{unique_id}.png")
+                        # =======================================================
+                        # ¡¡CAMBIO CLAVE A JPG!!
+                        output_path = os.path.join('generated_qrs', f"{unique_id}.jpg")
+                        # =======================================================
                         
                         # LLAMADA A LA FUNCIÓN CORREGIDA create_qr_card
                         create_qr_card(unique_id, output_path, selected_promo['description'], expiration, consecutive)
