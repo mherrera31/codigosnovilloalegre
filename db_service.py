@@ -1,4 +1,4 @@
-# db_service.py (VERSIÓN CORREGIDA 1/5)
+# db_service.py (VERSIÓN FINAL Y COMPLETA)
 import requests
 import streamlit as st
 import pandas as pd
@@ -24,7 +24,7 @@ def get_data_table(table_name: str, select_params: str = '*'):
         response.raise_for_status() 
         return response.json()
     except Exception as e:
-        # st.error(f"Error al cargar datos de {table_name}: {e}") # Desactivado para evitar spam en la interfaz
+        # st.error(f"Error al cargar datos de {table_name}: {e}") 
         return []
 
 def get_branches():
@@ -141,10 +141,6 @@ def update_entry(table_name: str, id_value: any, payload: dict, id_column: str =
         st.error("Se requiere autenticación para esta acción.")
         return False
 
-    # Corregir id_column para la tabla 'types'
-    if table_name == 'types':
-        id_column = 'id' # Asumiendo que sigue siendo 'id'
-    
     url = f"{POSTGREST_ENDPOINT}/{table_name}?{id_column}=eq.{id_value}"
     
     try:
@@ -198,16 +194,16 @@ def get_next_consecutive():
         response.raise_for_status()
         data = response.json()
         
-        # El campo 'consecutive' en la BD es INT, se debe asegurar que se lea como tal o se caiga en 0.
+        # El campo 'consecutive' en la BD es INT
         last_consecutive = int(data[0]['consecutive']) if data and data[0]['consecutive'] else 0
         return last_consecutive + 1
     except Exception as e:
-        # Fallback al consecutivo 1 si la tabla está vacía o hay un error.
+        # Fallback al consecutivo 1
         return 1 
 
-# --- NUEVA FUNCIÓN DE CÁLCULO DE VALOR DE VENTA ---
+# --- FUNCIÓN DE CÁLCULO DE VALOR DE VENTA INDIVIDUAL ---
 def calculate_sale_value(base_value: float, promo_data: dict):
-    """Calcula el valor de venta (precio pagado por la compañía)."""
+    """Calcula el valor de venta (precio pagado por la compañía) por cupón individual."""
     
     descount_value = promo_data['value'] # Valor de Promos: monto fijo o porcentaje
     
@@ -216,16 +212,13 @@ def calculate_sale_value(base_value: float, promo_data: dict):
         discount = base_value * (descount_value / 100.0)
     elif promo_data['is_cash_value']:
         # Descuento es el monto fijo de 'value'
-        # Asumimos que el 'value' de la promoción es el descuento en COLONES
-        if base_value == 0: # Si no se ingresó valor base, el descuento no aplica o es total
-             discount = 0
-        else:
-             discount = descount_value 
+        # Asumimos que el 'value' de la promoción es el descuento en COLONES/USD (según el contexto)
+        discount = descount_value 
     else: # is_product o no definido, no hay descuento de precio (la empresa paga el valor base)
-        discount = 0
+        discount = 0.0
         
     sale_value = base_value - discount
-    return max(0.0, sale_value) # No permitir valor de venta negativo
+    return round(max(0.0, sale_value), 2) # Aseguramos 2 decimales y no negativo
 
 # --- FUNCIÓN CENTRAL DE CREACIÓN DE LOTE ---
 def create_coupon_batch(
@@ -234,10 +227,10 @@ def create_coupon_batch(
     value_crc: float, 
     value_usd: float, 
     type_id: int, 
-    months_valid: int, # NUEVO: Meses de validez
+    months_valid: int, 
     branch_names: list, 
-    scope_ids: list, # NUEVO: IDs de Validez
-    restriction_ids: list, # NUEVO: IDs de Restricción
+    scope_ids: list, 
+    restriction_ids: list, 
     user_id: str
 ):
     """Genera un lote completo de cupones, insertando en BATCHES y COUPONS, y sus relaciones M:M."""
@@ -250,7 +243,7 @@ def create_coupon_batch(
         # 1. Preparar datos maestros y fechas
         branches = get_branches()
         branch_options = {b['name']: b['id'] for b in branches}
-        allowed_branch_ids = [str(branch_options[name]) for name in branch_names if name in branch_options] # Asegurar que sean strings si la BD espera UUID o TEXT[]
+        allowed_branch_ids = [str(branch_options[name]) for name in branch_names if name in branch_options]
         
         start_consecutive = get_next_consecutive()
         end_consecutive = start_consecutive + count - 1
@@ -259,11 +252,19 @@ def create_coupon_batch(
         # Cálculo de Fecha de Expiración
         expiration_date = (datetime.now() + timedelta(days=months_valid * 30)).strftime("%Y-%m-%d")
 
-        # Cálculo de Valor de Venta
+        # 2. CALCULAR VALORES INDIVIDUALES Y TOTALES
+        
+        # Valores Individuales (para guardar en BATCHES como base)
         sale_value_crc = calculate_sale_value(value_crc, promo_data)
         sale_value_usd = calculate_sale_value(value_usd, promo_data)
         
-        # 2. Insertar Lote (BATCHES)
+        # Valores Totales (para guardar en BATCHES)
+        total_ref_value_crc = round(value_crc * count, 2)
+        total_ref_value_usd = round(value_usd * count, 2)
+        total_sale_value_crc = round(sale_value_crc * count, 2)
+        total_sale_value_usd = round(sale_value_usd * count, 2)
+
+        # 3. Insertar Lote (BATCHES)
         batch_payload = {
             'id': batch_uuid,
             'batch_name': f"{promo_data['type_name']}_{datetime.now().strftime('%Y%m%d%H%M%S')}_{batch_uuid[:4]}",
@@ -272,15 +273,24 @@ def create_coupon_batch(
             'consecutive_end': end_consecutive,
             'branch_ids': allowed_branch_ids,
             'expiration_date': expiration_date,
-            'type_id': type_id, # RENOMBRADO de issuer_id a type_id
+            'type_id': type_id, 
             'created_by_user_id': user_id,
-            'sale_value_basis_crc': sale_value_crc, # NUEVO
-            'sale_value_basis_usd': sale_value_usd  # NUEVO
+            
+            # Valores Individuales (base de cálculo)
+            'sale_value_basis_crc': sale_value_crc, 
+            'sale_value_basis_usd': sale_value_usd,  
+            
+            # Valores Totales (Nuevas columnas solicitadas)
+            'total_ref_value_crc': total_ref_value_crc,
+            'total_ref_value_usd': total_ref_value_usd,
+            'total_sale_value_crc': total_sale_value_crc,
+            'total_sale_value_usd': total_sale_value_usd
         }
+        
         if not create_entry('batches', batch_payload):
             raise Exception("Fallo al crear el lote (BATCHES).")
 
-        # 3. Preparar e Insertar Cupones (COUPONS) y relaciones M:M
+        # 4. Preparar e Insertar Cupones (COUPONS) y relaciones M:M
         coupon_entries = []
         coupon_scopes_entries = []
         coupon_restrictions_entries = []
@@ -299,7 +309,7 @@ def create_coupon_batch(
                 'base_value_colones': value_crc,
                 'base_value_dolares': value_usd,
                 'expiration_date': expiration_date,
-                'creation_date': datetime.now().strftime("%Y-%m-%d %H:%M:%S") # Guardar Fecha de Emisión
+                'creation_date': datetime.now().strftime("%Y-%m-%d %H:%M:%S") 
             })
             
             # Datos de Relación M:M
@@ -355,7 +365,7 @@ def get_activity_report(filters: str):
     """Obtiene el reporte de actividad de cupones con joins para mostrar en la tabla."""
     token = st.session_state.get('token')
     
-    # Sintaxis de SELECT corregida para usar 'type_id' en lugar de 'issuer_id'
+    # Sintaxis de SELECT corregida para usar 'type_id'
     select_params = (
         "id,consecutive,is_redeemed,redemption_date,invoice_number,creation_date,"
         "batch_id(type:types(type_name))," # CAMBIO: issuer -> type, issuers -> types
@@ -403,6 +413,7 @@ def get_activity_report(filters: str):
 
 # =================================================================
 # 4. RENDERIZACIÓN DE LA INTERFAZ DE CONFIGURACIÓN (CRUD COMPLETO)
+# (Esta función permanece sin cambios funcionales desde la última versión)
 # =================================================================
 
 def render_config_management():
