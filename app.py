@@ -1,4 +1,4 @@
-# app.py (VERSIÓN FINAL - Descarga JPG Individual)
+# app.py (VERSIÓN CORREGIDA - Descarga ZIP)
 import streamlit as st
 import auth 
 import db_service
@@ -16,6 +16,10 @@ from pyzbar.pyzbar import decode
 from fpdf import FPDF 
 from db_config import get_headers 
 
+# --- ¡NUEVOS IMPORTS PARA ZIP! ---
+import zipfile
+import io
+
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(page_title="Sistema de QR Novillo Alegre", layout="wide")
 
@@ -24,6 +28,9 @@ LOGO_URL = "https://placehold.co/300x100/1E3260/FFFFFF/png?text=Novillo+Alegre+Q
 # --- CONFIGURACIÓN DE RUTAS ---
 TEMPLATE_DIR = 'design_templates'
 os.makedirs(TEMPLATE_DIR, exist_ok=True)
+GENERATED_QRS_DIR = 'generated_qrs'
+os.makedirs(GENERATED_QRS_DIR, exist_ok=True)
+
 TEMPLATE_PATH_KEY = 'current_template_path'
 
 # Inicializa la ruta de la plantilla si no existe
@@ -57,9 +64,7 @@ def create_qr_card(data_to_encode: str, output_path: str, description: str, expi
     AJUSTE CRÍTICO: Se corrigieron las coordenadas para asegurar la visibilidad del QR
     y la orientación horizontal de la tarjeta.
     """
-    if not os.path.exists('generated_qrs'):
-        os.makedirs('generated_qrs')
-        
+    
     # Usar las dimensiones fijas para la tarjeta horizontal
     card_img = Image.new('RGB', (CARD_WIDTH_PX, CARD_HEIGHT_PX), (255, 255, 255))
     draw = ImageDraw.Draw(card_img) 
@@ -330,37 +335,41 @@ elif app_mode == "🛠️ Creador de QRs":
                         expiration = entry['expiration_date']
                         
                         # ¡¡CAMBIO CLAVE A JPG!!
-                        output_path = os.path.join('generated_qrs', f"{unique_id}.jpg")
+                        output_path = os.path.join(GENERATED_QRS_DIR, f"{consecutive}.jpg")
                         
                         # LLAMADA A LA FUNCIÓN CORREGIDA create_qr_card
                         create_qr_card(unique_id, output_path, selected_promo['description'], expiration, consecutive)
-                        # Guardar el path Y el consecutivo para el botón de descarga
-                        generated_image_paths.append((output_path, consecutive))
+                        # Guardar el path para el ZIP
+                        generated_image_paths.append(output_path)
                         
                     
                     # =======================================================
-                    # ¡¡CAMBIO CLAVE: Sección de Descarga JPG!!
+                    # ¡¡CAMBIO CLAVE: Sección de Descarga ZIP!!
                     # =======================================================
-                    st.subheader("⬇️ Descargar Tarjetas Individuales (JPG)")
-                    st.info(f"Se generaron {len(generated_image_paths)} tarjetas.")
-
-                    # Usar columnas para mostrar los botones de descarga
-                    cols = st.columns(3) 
+                    st.subheader("⬇️ Descargar Lote Completo (ZIP)")
                     
-                    for idx, (path, consecutive) in enumerate(generated_image_paths):
-                        with open(path, "rb") as file:
-                            # Colocar cada botón en una columna (ciclo 0, 1, 2, 0, 1, 2...)
-                            cols[idx % 3].download_button(
-                                label=f"Descargar Consecutivo {consecutive}",
-                                data=file,
-                                file_name=os.path.basename(path),
-                                mime="image/jpeg", # Mime-type para JPG
-                                key=f"jpg_dl_{consecutive}" # Clave única
-                            )
+                    # Crear un buffer de bytes en memoria para el ZIP
+                    zip_buffer = io.BytesIO()
                     
-                    # =======================================================
-                    # SECCIÓN DE PDF ELIMINADA
-                    # =======================================================
+                    # Crear el archivo ZIP y añadir todas las imágenes generadas
+                    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+                        for file_path in generated_image_paths:
+                            # Añadir el archivo al ZIP usando solo el nombre del archivo (ej: "0234.jpg")
+                            zip_file.write(file_path, os.path.basename(file_path))
+                    
+                    # Preparar el buffer para la descarga
+                    zip_buffer.seek(0)
+                    
+                    # Nombre del archivo ZIP
+                    zip_filename = f"lote_tarjetas_{coupon_entries[0]['batch_id']}.zip"
+                    
+                    st.download_button(
+                        label=f"Descargar Lote Completo ({count} tarjetas)",
+                        data=zip_buffer,
+                        file_name=zip_filename,
+                        mime="application/zip",
+                        key="zip_download_btn" # Clave única
+                    )
 
 
     # ----------------------------------------
