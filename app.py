@@ -91,13 +91,15 @@ def create_qr_card(data_to_encode: str, output_path: str, description: str, expi
     # El QR debe estar en la esquina superior derecha (con un margen)
     # Posición X: Ancho de la tarjeta - Tamaño del QR - Margen
     # Posición Y: Margen superior (para no chocar con la banda roja)
-    QR_POSITION_X = CARD_WIDTH_PX - QR_SIZE_PX - BORDER_PX 
-    QR_POSITION_Y = 100 # Después de la banda roja, con un poco de margen
+    
+    # ¡¡CORRECCIÓN CLAVE!!
+    QR_POSITION_X = CARD_WIDTH_PX - QR_SIZE_PX - BORDER_PX # (1063 - 250 - 50 = 763)
+    QR_POSITION_Y = 100 # (Debajo de la banda roja de 80px)
 
     # Posiciones de texto para que no se superpongan
-    PROMO_DESCRIPTION_POSITION = (BORDER_PX, 100) # Inicio en Y=100 para no chocar con la banda roja
-    EXPIRATION_POSITION = (BORDER_PX, 250) 
-    CONSECUTIVE_POSITION = (BORDER_PX, 480) 
+    PROMO_DESCRIPTION_POSITION = (BORDER_PX, 150) # (50, 150)
+    EXPIRATION_POSITION = (BORDER_PX, 250) # (50, 250)
+    CONSECUTIVE_POSITION = (BORDER_PX, 480) # (50, 480) - Cerca del fondo
 
     # Dibujar Promoción
     draw.text(PROMO_DESCRIPTION_POSITION, description, fill=(0,0,0), font=main_font)
@@ -109,6 +111,7 @@ def create_qr_card(data_to_encode: str, output_path: str, description: str, expi
     draw.text(CONSECUTIVE_POSITION, f"CONSECUTIVO: {consecutive}", fill=(0, 0, 0), font=consecutive_font)
 
     # 4. PEGAR EL QR ESCALADO Y POSICIONADO CORRECTAMENTE
+    # ¡¡ESTA ES LA LÍNEA QUE DIBUJA EL QR!!
     qr_scaled = qr_img.resize((QR_SIZE_PX, QR_SIZE_PX))
     card_img.paste(qr_scaled, (QR_POSITION_X, QR_POSITION_Y))
     
@@ -117,7 +120,7 @@ def create_qr_card(data_to_encode: str, output_path: str, description: str, expi
     
 def generate_pdf_from_images(image_paths, output_filename):
     """Crea un PDF a partir de una lista de imágenes en formato 9x5 cm (horizontal)."""
-    # Orientación 'L' para Landscape (horizontal)
+    # ¡¡CORRECCIÓN CLAVE!! Orientación 'L' para Landscape (horizontal)
     pdf = FPDF(orientation='L', unit='mm', format=(CARD_WIDTH_MM, CARD_HEIGHT_MM))
     
     for image_path in image_paths:
@@ -130,23 +133,17 @@ def generate_pdf_from_images(image_paths, output_filename):
 
 def generate_design_template(output_filename):
     """Genera una plantilla de PDF con espacio blanco para el arte, QR y consecutivo (9x5 cm horizontal)."""
-    # Orientación 'L' para Landscape (horizontal)
+    # ¡¡CORRECCIÓN CLAVE!! Orientación 'L' para Landscape (horizontal)
     pdf = FPDF(orientation='L', unit='mm', format=(CARD_WIDTH_MM, CARD_HEIGHT_MM))
     pdf.add_page()
     
     pdf.set_font("Arial", "B", 8)
     pdf.cell(CARD_WIDTH_MM, 5, "PLANTILLA DE DISEÑO HORIZONTAL (9x5 CM)", 0, 1, 'C')
     
-    # Coordenadas en MM para el espacio del QR y consecutivo
-    # Necesitan reflejar la posición en la imagen pixelada.
-    # QR_POSITION_X_MM = (CARD_WIDTH_PX - QR_SIZE_PX - BORDER_PX) * CARD_WIDTH_MM / CARD_WIDTH_PX
-    # QR_POSITION_Y_MM = 100 * CARD_HEIGHT_MM / CARD_HEIGHT_PX
-    # QR_SIZE_MM = QR_SIZE_PX * CARD_WIDTH_MM / CARD_WIDTH_PX
-
-    # Simplificando a una posición fija en mm, acorde al diseño
-    QR_POS_X_MM = 60 # Aproximadamente en la esquina derecha
-    QR_POS_Y_MM = 15 # Un poco más abajo del borde superior
-    QR_DIM_MM = 25 # Tamaño del cuadrado QR en mm
+    # Coordenadas en MM para el espacio del QR
+    QR_POS_X_MM = 60 
+    QR_POS_Y_MM = 15 
+    QR_DIM_MM = 25 
     
     pdf.set_fill_color(255, 255, 255)
     pdf.rect(QR_POS_X_MM, QR_POS_Y_MM, QR_DIM_MM, QR_DIM_MM, 'F') 
