@@ -1,9 +1,9 @@
-# app.py (VERSIÓN CONSOLIDADA Y CORREGIDA FINAL)
+# app.py (VERSIÓN CORREGIDA 2/5)
 import streamlit as st
 import auth 
 import db_service
 import user_service
-import requests # Cliente HTTP para interactuar con la API de Supabase
+import requests 
 
 # --- Imports para la funcionalidad de QR/PDF ---
 import qrcode 
@@ -37,19 +37,18 @@ QR_SIZE_MM = 25
 
 
 # ----------------------------------------
-# FUNCIONES AUXILIARES (QR y PDF)
+# FUNCIONES AUXILIARES (QR y PDF) - CORRECCIÓN DE POSICIONAMIENTO
 # ----------------------------------------
 
 def create_qr_card(data_to_encode: str, output_path: str, description: str, expiration: str, consecutive: str):
     """
     Genera una imagen de tarjeta (9cm ANCHO x 5cm ALTO @ 300DPI) con el QR y el consecutivo.
-    (Basado en la versión original que dibujaba el QR, solo se ajusta el lienzo.)
+    AJUSTE CRÍTICO: Se corrigieron las coordenadas para asegurar la visibilidad del QR.
     """
     if not os.path.exists('generated_qrs'):
         os.makedirs('generated_qrs')
         
-    # CORRECCIÓN FINAL DE DIMENSIONES: 9cm ANCHO (1063px) x 5cm ALTO (591px)
-    # Al ser el ANCHO mayor que el ALTO, se respeta la orientación horizontal 5x9 cm.
+    # Dimensiones: 9cm ANCHO (1063px) x 5cm ALTO (591px) @ 300 DPI
     card_width, card_height = 1063, 591 
     bg_color, text_color = (255, 255, 255), (0, 0, 0)
     
@@ -76,19 +75,23 @@ def create_qr_card(data_to_encode: str, output_path: str, description: str, expi
     qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=8, border=2)
     qr.add_data(data_to_encode)
     qr.make(fit=True)
-    # Importante: Aseguramos el color negro para el relleno
     qr_img = qr.make_image(fill_color="black", back_color="white").convert('RGB')
     
     # 4. POSICIONES Y DIBUJO DE CONTENIDO
     QR_SIZE_PIXELS = 250
     
-    # Posiciones basadas en el código que funcionaba, ajustadas al lienzo 1063x591
-    QR_POSITION = (763, 130)       
-    CONSECUTIVE_POSITION = (50, 450)
-    EXPIRATION_POSITION = (50, 220) 
+    # AJUSTE CRÍTICO: Posición para centrar el QR en la esquina derecha (9cm x 5cm)
+    # 1063 (ancho) - 250 (QR size) - 50 (padding) = 763. Se deja el 763 anterior, pero se revisa el alto.
+    # El ancho de la tarjeta es 1063, el QR debe estar en el cuadrante superior/derecho.
     
+    # Se asegura que la posición sea visible y con padding
+    QR_POSITION = (card_width - QR_SIZE_PIXELS - 50, 150) # (763, 150)
+    CONSECUTIVE_POSITION = (50, 480) # Más abajo
+    EXPIRATION_POSITION = (50, 250) 
+    PROMO_DESCRIPTION_POSITION = (50, 150)
+
     # Dibujar Promoción
-    draw.text((50, 150), description, fill=text_color, font=main_font)
+    draw.text(PROMO_DESCRIPTION_POSITION, description, fill=text_color, font=main_font)
     
     # Dibujar Válido hasta
     draw.text(EXPIRATION_POSITION, f"Válido hasta: {expiration}", fill=(100, 100, 100), font=main_font)
@@ -96,7 +99,7 @@ def create_qr_card(data_to_encode: str, output_path: str, description: str, expi
     # Dibujar Consecutivo
     draw.text(CONSECUTIVE_POSITION, f"CONSECUTIVO: {consecutive}", fill=(0, 0, 0), font=consecutive_font)
 
-    # 5. PEGAR EL QR (Lógica del código original)
+    # 5. PEGAR EL QR 
     qr_scaled = qr_img.resize((QR_SIZE_PIXELS, QR_SIZE_PIXELS))
     card_img.paste(qr_scaled, QR_POSITION)
     
@@ -219,11 +222,16 @@ elif app_mode == "🛠️ Creador de QRs":
     
     promos = db_service.get_promos()
     branches = db_service.get_branches()
-    issuers = db_service.get_issuers()
+    types = db_service.get_types() # CAMBIO: get_types
+    scopes = db_service.get_validity_scopes() # NUEVO
+    restrictions = db_service.get_restrictions() # NUEVO
 
     promo_options = {p['type_name']: p for p in promos}
     branch_options = [b['name'] for b in branches]
-    issuer_options = {i['issuer_name']: i['id'] for i in issuers}
+    type_options = {t['type_name']: t['id'] for t in types} # CAMBIO: type_name/id
+    scope_options = {s['scope_name']: s['id'] for s in scopes} # NUEVO
+    restriction_options = {r['restriction_description']: r['id'] for r in restrictions} # NUEVO
+
     
     # --- Interfaz de Pestañas ---
     tab_creator, tab_template = st.tabs(["Generador de Lote", "Gestión de Plantilla"])
@@ -236,41 +244,64 @@ elif app_mode == "🛠️ Creador de QRs":
             
             col1, col2 = st.columns(2)
             with col1:
-                selected_promo_name = st.selectbox("Seleccionar Promoción/Diseño", options=list(promo_options.keys()))
+                selected_promo_name = st.selectbox("Seleccionar Promoción/Diseño (Determina el Descuento)", options=list(promo_options.keys()))
                 selected_promo = promo_options.get(selected_promo_name)
                 
-                st.caption(f"Descripción: {selected_promo['description']}")
-                value_crc = st.number_input("Valor de Referencia (Colones)", value=selected_promo['value'], min_value=0.0, format="%.2f")
-                value_usd = st.number_input("Valor de Referencia (Dólares)", value=round(selected_promo['value'] / 590, 2), min_value=0.0, format="%.2f")
-            
+                st.caption(f"Descripción para el canje: {selected_promo.get('description', 'N/A')}")
+                
+                # Input de Valor Base
+                value_crc = st.number_input("Valor Base del Cupón (Colones)", value=selected_promo.get('value', 0.0), min_value=0.0, format="%.2f")
+                value_usd = st.number_input("Valor Base del Cupón (Dólares)", value=round(selected_promo.get('value', 0.0) / 590, 2), min_value=0.0, format="%.2f")
+
+                # Cálculo y Muestra del Valor de Venta (Feedback)
+                if selected_promo:
+                    sale_value_crc = db_service.calculate_sale_value(value_crc, selected_promo)
+                    sale_value_usd = db_service.calculate_sale_value(value_usd, selected_promo)
+                    
+                    st.markdown(f"**Valor de Venta (CRC):** ₡{sale_value_crc:,.2f}")
+                    st.markdown(f"**Valor de Venta (USD):** ${sale_value_usd:,.2f}")
+
             with col2:
-                valid_days = st.number_input("Días de vigencia", min_value=1, max_value=365, value=30)
+                # CAMBIO: Dropdown de meses de vigencia
+                valid_months = st.selectbox("Meses de vigencia", options=[3, 6, 9, 12], index=0)
+                
+                # CAMBIO: Selector de Tipo/Campaña
+                selected_type_name = st.selectbox("Tipo/Campaña (Define el Uso)", options=list(type_options.keys()))
+                
+                # NUEVO: Selectores de Validez y Restricciones
                 allowed_branches = st.multiselect("Sucursales permitidas (dejar vacío para todas)", options=branch_options)
-                selected_issuer_name = st.selectbox("Emisor/Campaña", options=list(issuer_options.keys()))
+                selected_scope_names = st.multiselect("Validez de Cupón (Alcances permitidos)", options=list(scope_options.keys()))
+                selected_restriction_names = st.multiselect("Restricciones Aplicadas", options=list(restriction_options.keys()))
+
                 count = st.number_input("Cantidad de tarjetas a generar (lote)", min_value=1, max_value=100, value=1)
                 
             submitted = st.form_submit_button("🚀 Generar Tarjetas", type="primary")
 
         if submitted:
-            issuer_id = issuer_options.get(selected_issuer_name)
+            type_id = type_options.get(selected_type_name) # CAMBIO: type_id
             user_id = st.session_state.get('user_id')
             
-            if not selected_promo or not issuer_id or not user_id:
-                st.error("Faltan datos de configuración (Promoción o Emisor).")
+            # Obtener IDs de las selecciones
+            selected_scope_ids = [scope_options[name] for name in selected_scope_names]
+            selected_restriction_ids = [restriction_options[name] for name in selected_restriction_names]
+            
+            if not selected_promo or not type_id or not user_id:
+                st.error("Faltan datos de configuración (Promoción o Tipo/Campaña).")
             else:
                 st.success(f"Generando {count} tarjeta(s)...")
                 
+                # LLAMADA CORREGIDA A LA FUNCIÓN DE BATCH
                 coupon_entries = db_service.create_coupon_batch(
                     count=count,
-                    description=selected_promo['description'],
-                    promo_id=selected_promo['id'],
+                    promo_data=selected_promo, # Se pasa el objeto completo
                     value_crc=value_crc,
                     value_usd=value_usd,
-                    issuer_id=issuer_id,
-                    valid_days=valid_days,
+                    type_id=type_id,
+                    months_valid=valid_months, # Meses en lugar de días
                     branch_names=allowed_branches,
-                    user_id=user_id,
-                    batch_name_prefix=selected_promo_name
+                    scope_ids=selected_scope_ids, # NUEVO
+                    restriction_ids=selected_restriction_ids, # NUEVO
+                    user_id=user_id
                 )
                 
                 if coupon_entries:
