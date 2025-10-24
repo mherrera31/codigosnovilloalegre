@@ -1,4 +1,4 @@
-# qr_utils.py
+# qr_utils.py (SIN CAMBIOS, no se usa en app.py final)
 import qrcode
 from PIL import Image, ImageDraw, ImageFont
 import os
