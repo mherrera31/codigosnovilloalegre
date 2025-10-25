@@ -1,4 +1,4 @@
-# app.py (VERSIÓN COMPLETA FINAL - Con Tab Recibos)
+# app.py (VERSIÓN COMPLETA FINAL - Mandatory, Live Calc, Allowed Branches)
 import streamlit as st
 import auth
 import db_service
@@ -24,73 +24,65 @@ CARD_WIDTH_MM = 90; CARD_HEIGHT_MM = 50
 QR_SIZE_PX = 250; BORDER_PX = 50
 
 # --- Inicialización de Estado ---
+# Essential state variables
+if 'logged_in' not in st.session_state: st.session_state['logged_in'] = False
+if 'user_role' not in st.session_state: st.session_state['user_role'] = None
+if 'username' not in st.session_state: st.session_state['username'] = None
+if 'user_id' not in st.session_state: st.session_state['user_id'] = None
+if 'branch_id' not in st.session_state: st.session_state['branch_id'] = None
 if TEMPLATE_PATH_KEY not in st.session_state: st.session_state[TEMPLATE_PATH_KEY] = None
+# State for receipt and download display
 if 'last_receipt_data' not in st.session_state: st.session_state['last_receipt_data'] = None
 if 'show_receipt' not in st.session_state: st.session_state['show_receipt'] = False
 if 'last_zip_buffer' not in st.session_state: st.session_state['last_zip_buffer'] = None
 if 'last_zip_filename' not in st.session_state: st.session_state['last_zip_filename'] = None
+# State for selected receipt in reports
 if 'selected_receipt_id' not in st.session_state: st.session_state['selected_receipt_id'] = None
+# State for live calculation - use form key prefix for uniqueness if needed
+form_key_prefix = f"qr_creator_form_{st.session_state.get('form_key_counter', 0)}"
+if f'{form_key_prefix}_promo' not in st.session_state: st.session_state[f'{form_key_prefix}_promo'] = "-- Seleccione Promoción --"
+if f'{form_key_prefix}_vcrc' not in st.session_state: st.session_state[f'{form_key_prefix}_vcrc'] = None
+if f'{form_key_prefix}_vusd' not in st.session_state: st.session_state[f'{form_key_prefix}_vusd'] = None
+if f'{form_key_prefix}_count' not in st.session_state: st.session_state[f'{form_key_prefix}_count'] = None
 
 
 # --- FUNCIONES AUXILIARES ---
 def create_qr_card(data_to_encode: str, output_path: str, description: str, expiration: str, consecutive: str):
     """Genera JPG de tarjeta 9x5cm con QR, usando plantilla PNG si existe."""
     template_path = st.session_state.get(TEMPLATE_PATH_KEY)
-    card_img = None # Initialize to None
+    card_img = None
     try:
         if template_path and os.path.exists(template_path):
             card_img = Image.open(template_path).convert('RGB')
             if card_img.size != (CARD_WIDTH_PX, CARD_HEIGHT_PX):
-                # st.warning(f"Plantilla redimensionada a {CARD_WIDTH_PX}x{CARD_HEIGHT_PX}px.") # Reduce warnings
                 card_img = card_img.resize((CARD_WIDTH_PX, CARD_HEIGHT_PX))
     except Exception as e:
-        st.error(f"Error al cargar plantilla: {e}. Usando fondo blanco.")
-        # Fallback even if loading fails
-    
-    if card_img is None: # Create new image if template failed or doesn't exist
+        st.error(f"Err Plantilla: {e}. Fondo blanco.")
+
+    if card_img is None:
         card_img = Image.new('RGB', (CARD_WIDTH_PX, CARD_HEIGHT_PX), (255, 255, 255))
 
     draw = ImageDraw.Draw(card_img)
-    # Dibujar elementos base si no hay plantilla efectiva
-    has_template = template_path and os.path.exists(template_path) and card_img.size == (CARD_WIDTH_PX, CARD_HEIGHT_PX) # Check again after potential resize/error
+    has_template = template_path and os.path.exists(template_path) and card_img.size == (CARD_WIDTH_PX, CARD_HEIGHT_PX)
     if not has_template:
         draw.rectangle([0, 0, CARD_WIDTH_PX, 80], fill=(191, 2, 2))
         try:
             title_font = ImageFont.truetype("arialbd.ttf", size=32)
             draw.text((30, 25), "TARJETA DE REGALO NOVILLO ALEGRE", fill=(255,255,255), font=title_font)
-        except IOError: pass # Ignorar si la fuente no está
-
-    # Cargar fuentes principales
+        except IOError: pass
     try:
         main_font = ImageFont.truetype("arial.ttf", size=30)
         consecutive_font = ImageFont.truetype("arialbd.ttf", size=40)
     except IOError:
         main_font = consecutive_font = ImageFont.load_default()
 
-    # Generar QR
-    qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=8, border=2)
-    qr.add_data(data_to_encode); qr.make(fit=True)
-    qr_img = qr.make_image(fill_color="black", back_color="white").convert('RGB')
-    QR_POS_X = CARD_WIDTH_PX - QR_SIZE_PX - BORDER_PX; QR_POS_Y = 100
-
-    # Posiciones de texto
-    if has_template: # Posiciones asumidas para la plantilla
-        PROMO_POS = (BORDER_PX, 400); EXP_POS = (BORDER_PX, 440); CONS_POS = (BORDER_PX, 480)
-    else: # Posiciones estándar sobre fondo blanco
-        PROMO_POS = (BORDER_PX, 150); EXP_POS = (BORDER_PX, 250); CONS_POS = (BORDER_PX, 480)
-
-    # Dibujar textos
-    draw.text(PROMO_POS, description, fill=(0,0,0), font=main_font)
-    draw.text(EXP_POS, f"Válido hasta: {expiration}", fill=(100, 100, 100), font=main_font)
-    draw.text(CONS_POS, f"CONSECUTIVO: {consecutive}", fill=(0, 0, 0), font=consecutive_font)
-
-    # Pegar QR
-    qr_scaled = qr_img.resize((QR_SIZE_PX, QR_SIZE_PX))
-    card_img.paste(qr_scaled, (QR_POS_X, QR_POS_Y))
-
-    # Guardar como JPG
-    card_img.save(output_path, "JPEG", quality=95)
-    return output_path
+    qr = qrcode.QRCode(1, qrcode.constants.ERROR_CORRECT_M, 8, 2); qr.add_data(data_to_encode); qr.make(fit=True); qr_img = qr.make_image(fill_color="black", back_color="white").convert('RGB')
+    QR_X = CARD_WIDTH_PX - QR_SIZE_PX - BORDER_PX; QR_Y = 100
+    if has_template: PROMO_POS = (BORDER_PX, 400); EXP_POS = (BORDER_PX, 440); CONS_POS = (BORDER_PX, 480)
+    else: PROMO_POS = (BORDER_PX, 150); EXP_POS = (BORDER_PX, 250); CONS_POS = (BORDER_PX, 480)
+    draw.text(PROMO_POS, description, fill=(0,0,0), font=main_font); draw.text(EXP_POS, f"Válido hasta: {expiration}", fill=(100,100,100), font=main_font); draw.text(CONS_POS, f"CONSECUTIVO: {consecutive}", fill=(0,0,0), font=consecutive_font)
+    qr_scaled = qr_img.resize((QR_SIZE_PX, QR_SIZE_PX)); card_img.paste(qr_scaled, (QR_X, QR_Y))
+    card_img.save(output_path, "JPEG", quality=95); return output_path
 
 def generate_design_template(output_filename):
     """Genera guía JPG 9x5cm."""
@@ -105,16 +97,14 @@ def generate_design_template(output_filename):
 def format_receipt(receipt_data):
     """Formatea los datos del recibo para mostrar en st.code."""
     if not receipt_data: return "Error: No se encontraron datos de recibo."
-    # Safely get values using .get() with defaults
-    created_at_str = 'N/A'
-    created_at_val = receipt_data.get('created_at')
+    created_at_str = 'N/A'; created_at_val = receipt_data.get('created_at')
     if created_at_val:
-        try:
-             # Try parsing with timezone first, then without if it fails
-             dt_obj = pd.to_datetime(created_at_val)
-             created_at_str = dt_obj.strftime('%Y-%m-%d %H:%M:%S')
-        except Exception:
-             created_at_str = str(created_at_val) # Fallback to string representation
+        try: dt_obj = pd.to_datetime(created_at_val); created_at_str = dt_obj.strftime('%Y-%m-%d %H:%M:%S')
+        except Exception: created_at_str = str(created_at_val)
+    # Ensure numeric types before formatting
+    def safe_float(val, default=0.0):
+        try: return float(val) if val is not None else default
+        except (ValueError, TypeError): return default
 
     return f"""
     -----------------------------------------
@@ -126,20 +116,22 @@ def format_receipt(receipt_data):
     Consecutivo Inicial: {receipt_data.get('consecutive_start', 0):04d}
     Consecutivo Final:   {receipt_data.get('consecutive_end', 0):04d}
     -----------------------------------------
-    Valor Base Total (CRC): ₡ {float(receipt_data.get('total_ref_value_crc', 0.0)):,.2f}
-    Valor Base Total (USD): $ {float(receipt_data.get('total_ref_value_usd', 0.0)):,.2f}
+    Valor Base Total (CRC): ₡ {safe_float(receipt_data.get('total_ref_value_crc')):,.2f}
+    Valor Base Total (USD): $ {safe_float(receipt_data.get('total_ref_value_usd')):,.2f}
     -----------------------------------------
-    VALOR TOTAL PAGADO (CRC): ₡ {float(receipt_data.get('total_sale_value_crc', 0.0)):,.2f}
-    VALOR TOTAL PAGADO (USD): $ {float(receipt_data.get('total_sale_value_usd', 0.0)):,.2f}
+    VALOR TOTAL PAGADO (CRC): ₡ {safe_float(receipt_data.get('total_sale_value_crc')):,.2f}
+    VALOR TOTAL PAGADO (USD): $ {safe_float(receipt_data.get('total_sale_value_usd')):,.2f}
     -----------------------------------------
     Fecha Generación: {created_at_str}
     -----------------------------------------
     """
 
+# --- CALLBACK PARA CÁLCULO EN VIVO ---
+# No longer needed, calculation is done directly below the form
+
 # --- LÓGICA DE INICIALIZACIÓN Y LOGIN ---
 if 'logged_in' not in st.session_state: st.session_state['logged_in'] = False
-if 'user_role' not in st.session_state: st.session_state['user_role'] = None
-if 'branch_id' not in st.session_state: st.session_state['branch_id'] = None
+# ... (rest of state initialization)
 if not auth.is_authenticated():
     st.image(LOGO_URL, width=300); st.title("QR-Creator"); auth.login_ui(); st.stop()
 
@@ -151,7 +143,6 @@ with st.sidebar:
     if user_role:
         st.success(f"**Usuario:** {st.session_state.get('username', 'N/A')}\n**Rol:** {user_role}")
         menu_options = ["🏠 Dashboard"]
-        # Consistent naming for sidebar options
         if user_role == 'Admin': menu_options.extend(["🔑 Gestión de Usuarios", "⚙️ Configuración", "📊 Reportes"])
         if user_role in ['Admin', 'Creator']: menu_options.append("🛠️ Creador QR")
         if user_role in ['Admin', 'Cashier']: menu_options.append("📲 Escáner")
@@ -169,8 +160,8 @@ elif app_mode == "🔑 Gestión de Usuarios": user_service.render_user_managemen
 elif app_mode == "⚙️ Configuración": db_service.render_config_management()
 elif app_mode == "📲 Escáner":
     st.header("Abrir Aplicación de Escáner")
-    st.markdown("Presione el botón para abrir la aplicación web de escaneo de cupones.")
-    SCANNER_URL = "https://scannernovillo.netlify.app/" # Make sure this is correct
+    st.markdown("Presione el botón para abrir la aplicación web de escaneo.")
+    SCANNER_URL = "https://scannernovillo.netlify.app/"
     st.link_button("Abrir Escáner", url=SCANNER_URL, type="primary")
 
 # --- MÓDULO CREADOR QR ---
@@ -191,85 +182,113 @@ elif app_mode == "🛠️ Creador QR":
         st.header("Creación de Tarjetas QR")
 
         # --- Form Handling ---
-        # Initialize form state if not present (helps with clearing)
         if 'form_key_counter' not in st.session_state: st.session_state['form_key_counter'] = 0
         form_key = f"qr_creator_form_{st.session_state['form_key_counter']}"
 
-        with st.form(form_key, clear_on_submit=False): # Control clearing manually via rerun
+        # --- Live Calculation Display Area (Outside Form) ---
+        # Get current values from state (widgets update state via key)
+        live_promo_name = st.session_state.get(f"{form_key}_promo", "-- Seleccione Promoción --")
+        live_promo_data = promo_options.get(live_promo_name, {})
+        live_vcrc = st.session_state.get(f"{form_key}_vcrc") # Can be None initially
+        live_vusd = st.session_state.get(f"{form_key}_vusd") # Can be None initially
+        live_count = st.session_state.get(f'{form_key}_count') # Can be None initially
+
+        st.subheader("Cálculo Estimado")
+        calc_placeholder = st.empty() # Placeholder to show calculation or prompt
+        show_calc = False
+        if live_promo_name != "-- Seleccione Promoción --" and live_vcrc is not None and live_vcrc >= 0 and live_vusd is not None and live_vusd >= 0 and live_count is not None and live_count > 0:
+            show_calc = True
+            disc_crc = db_service.calculate_discount_per_coupon(live_vcrc, live_promo_data)
+            disc_usd = db_service.calculate_discount_per_coupon(live_vusd, live_promo_data)
+            total_sale_crc = round((live_vcrc * live_count) - (disc_crc * live_count), 2)
+            total_sale_usd = round((live_vusd * live_count) - (disc_usd * live_count), 2)
+
+            with calc_placeholder.container():
+                calc_col1, calc_col2 = st.columns(2)
+                with calc_col1:
+                    st.metric(label="Descuento x Cupón (CRC)", value=f"₡ {disc_crc:,.2f}")
+                    st.metric(label="Valor Total Pagado (CRC)", value=f"₡ {total_sale_crc:,.2f}")
+                with calc_col2:
+                    st.metric(label="Descuento x Cupón (USD)", value=f"$ {disc_usd:,.2f}")
+                    st.metric(label="Valor Total Pagado (USD)", value=f"$ {total_sale_usd:,.2f}")
+        else:
+             with calc_placeholder.container():
+                st.caption("Llene todos los campos marcados con (*) para ver el cálculo estimado.")
+        st.divider()
+
+
+        # --- Form Definition ---
+        with st.form(form_key, clear_on_submit=True):
             st.subheader("Configuración del Lote")
             promo_list = ["-- Seleccione Promoción --"] + list(promo_options.keys())
             type_list = ["-- Seleccione Tipo --"] + list(type_options.keys())
 
-            # Inputs
-            input_asociado = st.text_input("**Asociado o Comprador** (Obligatorio)", key=f"{form_key}_asoc")
-            input_batch_name = st.text_input("Nombre Personalizado Lote (Opcional)", key=f"{form_key}_bname")
+            # Removed optional batch name input
+            input_asociado = st.text_input("**Asociado o Comprador (*Obligatorio*)**", key=f"{form_key}_asoc")
 
             col1, col2 = st.columns(2)
             with col1:
-                selected_promo_name = st.selectbox("Promoción/Diseño*", options=promo_list, index=0, key=f"{form_key}_promo")
-                selected_promo = promo_options.get(selected_promo_name, {})
-                st.caption(f"Descripción (Canje): {selected_promo.get('description', 'N/A')}")
-                value_crc = st.number_input("Valor Base CRC*", min_value=0.0, format="%.2f", value=None, placeholder="0.00", key=f"{form_key}_vcrc")
-                value_usd = st.number_input("Valor Base USD*", min_value=0.0, format="%.2f", value=None, placeholder="0.00", key=f"{form_key}_vusd")
-
-                # Calculation Display
-                count_val = st.session_state.get(f'{form_key}_count', 0) if st.session_state.get(f'{form_key}_count') is not None else 0
-                if selected_promo_name != "-- Seleccione Promoción --" and value_crc is not None and value_usd is not None and count_val > 0:
-                    disc_crc = db_service.calculate_discount_per_coupon(value_crc, selected_promo)
-                    disc_usd = db_service.calculate_discount_per_coupon(value_usd, selected_promo)
-                    total_sale_crc = round((value_crc * count_val) - (disc_crc * count_val), 2)
-                    total_sale_usd = round((value_usd * count_val) - (disc_usd * count_val), 2)
-                    st.markdown(f"**Desc. x Cupón (CRC):** ₡`{disc_crc:,.2f}` | **Total Pagado:** ₡`{total_sale_crc:,.2f}`")
-                    st.markdown(f"**Desc. x Cupón (USD):** $`{disc_usd:,.2f}` | **Total Pagado:** $`{total_sale_usd:,.2f}`")
-                else: st.caption("Llene campos (*) para ver cálculo.")
+                selected_promo_name = st.selectbox("Promoción/Diseño (*Obligatorio*)", options=promo_list, index=0, key=f"{form_key}_promo")
+                st.caption(f"Descripción (Canje): {promo_options.get(selected_promo_name, {}).get('description', 'N/A')}")
+                value_crc = st.number_input("Valor Base CRC (*Obligatorio*)", min_value=0.0, format="%.2f", value=st.session_state.get(f"{form_key}_vcrc"), placeholder="0.00", key=f"{form_key}_vcrc")
+                value_usd = st.number_input("Valor Base USD (*Obligatorio*)", min_value=0.0, format="%.2f", value=st.session_state.get(f"{form_key}_vusd"), placeholder="0.00", key=f"{form_key}_vusd")
+                # Live calculation display moved outside
 
             with col2:
-                valid_months = st.selectbox("Meses Vigencia*", options=[3, 6, 9, 12], index=0, key=f"{form_key}_months")
-                selected_type_name = st.selectbox("Tipo/Campaña*", options=type_list, index=0, key=f"{form_key}_type")
-                allowed_branches = st.multiselect("Sucursales Permitidas", options=branch_options, key=f"{form_key}_branches")
+                valid_months = st.selectbox("Meses Vigencia (*Obligatorio*)", options=[3, 6, 9, 12], index=0, key=f"{form_key}_months")
+                selected_type_name = st.selectbox("Tipo/Campaña (*Obligatorio*)", options=type_list, index=0, key=f"{form_key}_type")
+                # Help text added to multiselect
+                allowed_branches = st.multiselect("Sucursales Permitidas", options=branch_options, key=f"{form_key}_branches", help="Dejar vacío para permitir canje en todas las sucursales.")
                 selected_scope_names = st.multiselect("Validez Cupón", options=list(scope_options.keys()), key=f"{form_key}_scopes")
                 selected_restriction_names = st.multiselect("Restricciones", options=list(restriction_options.keys()), key=f"{form_key}_restrictions")
-                count = st.number_input("Cantidad*", min_value=1, max_value=1000, value=None, placeholder="1", key=f'{form_key}_count')
+                count = st.number_input("Cantidad (*Obligatorio*)", min_value=1, max_value=1000, value=st.session_state.get(f'{form_key}_count'), placeholder="1", key=f'{form_key}_count')
 
             submitted = st.form_submit_button("✔️ Generar Lote")
 
             if submitted:
-                # Validation logic remains the same
+                # --- VALIDACIÓN FINAL ---
                 error = False
-                if not input_asociado: st.error("❌ 'Asociado' es obligatorio."); error = True
-                if selected_promo_name == "-- Seleccione Promoción --": st.error("❌ Seleccione Promoción."); error = True
-                # Check for None explicitly because 0 is a valid value
-                if value_crc is None or value_crc < 0: st.error("❌ Ingrese Valor Base CRC válido."); error = True
-                if value_usd is None or value_usd < 0: st.error("❌ Ingrese Valor Base USD válido."); error = True
-                if selected_type_name == "-- Seleccione Tipo --": st.error("❌ Seleccione Tipo/Campaña."); error = True
-                if count is None or count <= 0: st.error("❌ Ingrese Cantidad > 0."); error = True
+                asoc_val = st.session_state.get(f"{form_key}_asoc")
+                promo_val = st.session_state.get(f"{form_key}_promo")
+                vcrc_val = st.session_state.get(f"{form_key}_vcrc")
+                vusd_val = st.session_state.get(f"{form_key}_vusd")
+                type_val = st.session_state.get(f"{form_key}_type")
+                count_val = st.session_state.get(f'{form_key}_count')
+                months_val = st.session_state.get(f"{form_key}_months") # Vigencia needed
+
+                if not asoc_val: st.error("❌ 'Asociado' es obligatorio."); error = True
+                if not promo_val or promo_val == "-- Seleccione Promoción --": st.error("❌ Seleccione Promoción."); error = True
+                if vcrc_val is None or vcrc_val < 0: st.error("❌ Ingrese Valor Base CRC válido."); error = True
+                if vusd_val is None or vusd_val < 0: st.error("❌ Ingrese Valor Base USD válido."); error = True
+                if not type_val or type_val == "-- Seleccione Tipo --": st.error("❌ Seleccione Tipo/Campaña."); error = True
+                if count_val is None or count_val <= 0: st.error("❌ Ingrese Cantidad > 0."); error = True
+                if months_val is None: st.error("❌ Seleccione Meses de Vigencia."); error=True # Should not happen with selectbox default
 
                 if not error:
-                    # Proceed with generation
-                    type_id = type_options.get(selected_type_name)
+                    type_id = type_options.get(type_val)
                     user_id = st.session_state.get('user_id')
-                    scope_ids = [scope_options[n] for n in selected_scope_names]
-                    restriction_ids = [restriction_options[n] for n in selected_restriction_names]
-                    st.info(f"⚙️ Generando {count} tarjeta(s)... Por favor espere.")
+                    sel_branches = st.session_state.get(f"{form_key}_branches", [])
+                    sel_scopes = st.session_state.get(f"{form_key}_scopes", [])
+                    sel_restrictions = st.session_state.get(f"{form_key}_restrictions", [])
+                    scope_ids = [scope_options[n] for n in sel_scopes]
+                    restriction_ids = [restriction_options[n] for n in sel_restrictions]
+                    selected_promo_data = promo_options.get(promo_val, {})
 
+                    st.info(f"⚙️ Generando {count_val} tarjeta(s)... Por favor espere.")
                     result = db_service.create_coupon_batch(
-                        count=count, asociado_comprador=input_asociado, batch_name=input_batch_name,
-                        promo_data=selected_promo, value_crc=value_crc, value_usd=value_usd,
-                        type_id=type_id, months_valid=valid_months, branch_names=allowed_branches,
+                        count=count_val, asociado_comprador=asoc_val, # Pass asociado
+                        promo_data=selected_promo_data, value_crc=vcrc_val, value_usd=vusd_val,
+                        type_id=type_id, months_valid=months_val, branch_names=sel_branches,
                         scope_ids=scope_ids, restriction_ids=restriction_ids, user_id=user_id
                     )
-
                     if result and result.get('coupon_entries'):
                         st.success("✅ ¡Lote y recibo generados!")
                         st.balloons()
-                        generated_paths = []
-                        coupons = result['coupon_entries']
-                        # Generate JPGs
+                        generated_paths = []; coupons = result['coupon_entries']
                         for entry in coupons:
                             path = os.path.join(GENERATED_QRS_DIR, f"{entry['consecutive']:04d}.jpg")
-                            create_qr_card(entry['id'], path, selected_promo.get('description','N/A'), entry['expiration_date'], f"{entry['consecutive']:04d}")
+                            create_qr_card(entry['id'], path, selected_promo_data.get('description','N/A'), entry['expiration_date'], f"{entry['consecutive']:04d}")
                             generated_paths.append(path)
-                        # Create ZIP
                         zip_buffer = io.BytesIO()
                         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
                             for p in generated_paths: zf.write(p, os.path.basename(p))
@@ -280,12 +299,14 @@ elif app_mode == "🛠️ Creador QR":
                         st.session_state['show_receipt'] = True
                         st.session_state['last_zip_buffer'] = zip_buffer
                         st.session_state['last_zip_filename'] = zip_filename
-                        # Increment counter to force form reset on next interaction
-                        st.session_state['form_key_counter'] += 1
-                        st.rerun() # Rerun to display receipt and clear form visually
+                        # Reset live calc state immediately
+                        st.session_state[f'{form_key}_promo'] = "-- Seleccione Promoción --";
+                        st.session_state[f'{form_key}_vcrc'] = None; st.session_state[f'{form_key}_vusd'] = None; st.session_state[f'{form_key}_count'] = None;
+                        st.session_state[f'{form_key}_asoc'] = "" # Clear asociado too
+                        st.session_state['form_key_counter'] += 1 # Increment form key
+                        st.rerun() # Rerun to display receipt and use new form key
                     else:
-                        st.error("🚨 Error al generar el lote. Revise los mensajes.")
-                        st.session_state['show_receipt'] = False # Ensure old receipt isn't shown
+                        st.error("🚨 Error al generar el lote. Revise los mensajes."); st.session_state['show_receipt'] = False
 
         # --- Display Receipt and Download (Outside Form) ---
         if st.session_state.get('show_receipt') and st.session_state.get('last_receipt_data'):
@@ -300,25 +321,19 @@ elif app_mode == "🛠️ Creador QR":
                     label="Descargar Lote Completo", data=st.session_state['last_zip_buffer'],
                     file_name=st.session_state['last_zip_filename'], mime="application/zip", key="zip_dl_final")
             else: st.warning("Archivo ZIP no encontrado.")
-            # Button to clear state and effectively start over
             if st.button("✨ Listo (Ocultar Recibo)"):
-                st.session_state['show_receipt'] = False
-                st.session_state['last_receipt_data'] = None
-                st.session_state['last_zip_buffer'] = None
-                st.session_state['last_zip_filename'] = None
-                # Incrementing counter helps ensure form truly resets if rerun isn't enough
-                st.session_state['form_key_counter'] += 1
+                st.session_state['show_receipt'] = False; st.session_state['last_receipt_data'] = None
+                st.session_state['last_zip_buffer'] = None; st.session_state['last_zip_filename'] = None
+                st.session_state['form_key_counter'] += 1 # Increment key again
                 st.rerun()
 
     # --- Gestión de Plantilla ---
     with tab_template:
         st.header("Gestión de Plantilla"); st.subheader("1. Guía (JPG)"); st.markdown("Guía horizontal (9x5 cm).")
         BLANK_JPG = os.path.join(TEMPLATE_DIR, "plantilla_guia.jpg")
-        # Generate guide on demand before download
         if st.button("Generar/Descargar Guía JPG", key="dl_guide"):
             generate_design_template(BLANK_JPG);
-            with open(BLANK_JPG, "rb") as f:
-                st.download_button("Descargar Guía (JPG)", f, os.path.basename(BLANK_JPG), "image/jpeg", key="dl_guide_btn")
+            with open(BLANK_JPG, "rb") as f: st.download_button("Descargar Guía (JPG)", f, os.path.basename(BLANK_JPG), "image/jpeg", key="dl_guide_btn")
         st.markdown("---"); st.subheader("2. Subir Plantilla (PNG)")
         up_file = st.file_uploader("Suba PNG (1063x591px, Horizontal)", type="png", key="up_tmpl")
         if up_file:
@@ -326,12 +341,10 @@ elif app_mode == "🛠️ Creador QR":
             try:
                 with open(save_path, "wb") as f: f.write(up_file.getbuffer())
                 st.session_state[TEMPLATE_PATH_KEY] = save_path; st.success(f"Plantilla cargada: {up_file.name}")
-            except Exception as e:
-                st.error(f"Error al guardar plantilla: {e}")
-        # Display current template info
+            except Exception as e: st.error(f"Error al guardar: {e}")
         current_template = st.session_state.get(TEMPLATE_PATH_KEY)
         if current_template and os.path.exists(current_template): st.info(f"🎨 Plantilla Actual: {os.path.basename(current_template)}")
-        else: st.warning("No hay plantilla cargada. Se usará fondo blanco.")
+        else: st.warning("No hay plantilla. Se usará fondo blanco.")
 
 
 # --- MÓDULO REPORTES ---
@@ -353,6 +366,7 @@ elif app_mode == "📊 Reportes":
         coupon_filter_string = "&".join(coupon_filters)
         df_coupons = db_service.get_activity_report(coupon_filter_string)
         if not df_coupons.empty:
+            # Display DataFrame, ensuring 'Sucursales Permitidas' is shown
             st.dataframe(df_coupons, use_container_width=True, hide_index=True)
             total_qrs = len(df_coupons); redeemed_qrs = df_coupons['is_redeemed'].sum()
             c1, c2 = st.columns(2); c1.metric("Total", f"{total_qrs} 🎟️"); c2.metric("Canjeados", f"{redeemed_qrs} ✅")
@@ -361,51 +375,37 @@ elif app_mode == "📊 Reportes":
     # --- Tab Lotes ---
     with tab_lotes:
         st.subheader("Resumen de Lotes Creados")
-        df_batches = db_service.get_batch_report() # Includes 'ID Lote' now
+        df_batches = db_service.get_batch_report()
         if not df_batches.empty:
-            # Display simple dataframe for now, reimprimir can be added based on this
-            st.dataframe(df_batches.drop(columns=['ID Lote'], errors='ignore'), use_container_width=True, hide_index=True) # Hide internal ID
-            total_lotes = len(df_batches); total_creados = df_batches['Creados'].sum(); total_canjeados = df_batches['Canjeados'].sum()
-            c1,c2,c3 = st.columns(3); c1.metric("Lotes", f"{total_lotes}"); c2.metric("Creados", f"{total_creados}"); c3.metric("Canjeados", f"{total_canjeados}")
+            # Format numeric columns before display
+            num_cols_crc = ['Ref CRC', 'Venta CRC']
+            num_cols_usd = ['Ref USD', 'Venta USD']
+            for col in num_cols_crc: df_batches[col] = pd.to_numeric(df_batches[col], errors='coerce').fillna(0).apply(lambda x: f"₡ {x:,.2f}")
+            for col in num_cols_usd: df_batches[col] = pd.to_numeric(df_batches[col], errors='coerce').fillna(0).apply(lambda x: f"$ {x:,.2f}")
+
+            # Display simple dataframe
+            st.dataframe(df_batches.drop(columns=['ID Lote'], errors='ignore'), use_container_width=True, hide_index=True)
+            total_lotes = len(df_batches); total_creados = pd.to_numeric(df_batches['Creados'], errors='coerce').sum(); total_canjeados = pd.to_numeric(df_batches['Canjeados'], errors='coerce').sum()
+            c1,c2,c3 = st.columns(3); c1.metric("Lotes", f"{total_lotes}"); c2.metric("Total Creados", f"{total_creados}"); c3.metric("Total Canjeados", f"{total_canjeados}")
         else: st.info("No hay lotes creados.")
 
     # --- Tab Recibos ---
     with tab_recibos:
         st.subheader("Visualizar / Reimprimir Recibos de Lote")
         df_receipts_list = db_service.get_all_receipts()
-
         if not df_receipts_list.empty:
-            # Create display options: "ID - Nombre (Fecha)"
-            receipt_options_dict = {
-                f"{row['Recibo ID']} - {row['Nombre Lote']} ({row['Fecha Generado']})": row['Recibo ID']
-                for _, row in df_receipts_list.iterrows()
-            }
+            receipt_options_dict = {f"{row['Recibo ID']} - {row['Nombre Lote']} ({row['Fecha Generado']})": row['Recibo ID'] for _, row in df_receipts_list.iterrows()}
             receipt_display_list = ["-- Seleccione un Recibo --"] + list(receipt_options_dict.keys())
-
-            selected_receipt_display = st.selectbox(
-                "Seleccione el recibo:",
-                options=receipt_display_list, index=0, key="receipt_selector"
-            )
-
+            selected_receipt_display = st.selectbox("Seleccione el recibo:", options=receipt_display_list, index=0, key="receipt_selector")
             if selected_receipt_display != "-- Seleccione un Recibo --":
                 selected_receipt_id = receipt_options_dict[selected_receipt_display]
-                # Store selected ID in session state to persist selection
-                st.session_state['selected_receipt_id'] = selected_receipt_id
-
-                # Fetch and display the selected receipt data using the ID from state
+                st.session_state['selected_receipt_id'] = selected_receipt_id # Store selection
                 if st.session_state['selected_receipt_id']:
                     receipt_data = db_service.get_receipt_data(st.session_state['selected_receipt_id'])
                     if receipt_data:
-                        st.divider()
-                        st.subheader(f"Detalles del Recibo #{st.session_state['selected_receipt_id']}")
-                        receipt_text = format_receipt(receipt_data)
-                        st.code(receipt_text, language=None)
-                        st.caption("Puede copiar este texto o usar Ctrl+P / Cmd+P para imprimir.")
-                    else:
-                        st.error(f"No se pudieron cargar detalles del recibo ID: {st.session_state['selected_receipt_id']}")
-            else:
-                 # Clear selection if default is chosen
-                 st.session_state['selected_receipt_id'] = None
-                 st.info("Seleccione un recibo de la lista para ver sus detalles.")
-        else:
-            st.warning("No se han encontrado recibos guardados.")
+                        st.divider(); st.subheader(f"Detalles del Recibo #{st.session_state['selected_receipt_id']}")
+                        st.code(format_receipt(receipt_data), language=None)
+                        st.caption("Copie o imprima (Ctrl+P / Cmd+P).")
+                    else: st.error(f"No se cargaron detalles del recibo ID: {st.session_state['selected_receipt_id']}")
+            else: st.session_state['selected_receipt_id'] = None; st.info("Seleccione un recibo.")
+        else: st.warning("No hay recibos guardados.")
