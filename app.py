@@ -1,8 +1,8 @@
-# app.py (VERSIÓN COMPLETA FINAL - Mandatory, Live Calc, Allowed Branches Report)
+# app.py (VERSIÓN COMPLETA FINAL - Restaurando render_config_management y render_user_management si estaban integrados)
 import streamlit as st
 import auth
 import db_service
-import user_service # Import user_service here
+import user_service # Importar user_service
 import requests
 import qrcode
 from PIL import Image, ImageDraw, ImageFont
@@ -27,7 +27,7 @@ QR_SIZE_PX = 250; BORDER_PX = 50
 # Essential state variables
 if 'logged_in' not in st.session_state: st.session_state['logged_in'] = False
 if 'user_role' not in st.session_state: st.session_state['user_role'] = None
-if 'username' not in st.session_state: st.session_state['username'] = None
+if 'username' not in st.session_state: st.session_state['username'] = 'N/A' # Default username
 if 'user_id' not in st.session_state: st.session_state['user_id'] = None
 if 'branch_id' not in st.session_state: st.session_state['branch_id'] = None
 if TEMPLATE_PATH_KEY not in st.session_state: st.session_state[TEMPLATE_PATH_KEY] = None
@@ -55,23 +55,27 @@ def create_qr_card(data_to_encode: str, output_path: str, description: str, expi
     except Exception as e:
         st.error(f"Err Plantilla: {e}. Fondo blanco.")
 
-    if card_img is None:
+    if card_img is None: # Create new image if template failed or doesn't exist
         card_img = Image.new('RGB', (CARD_WIDTH_PX, CARD_HEIGHT_PX), (255, 255, 255))
 
     draw = ImageDraw.Draw(card_img)
-    has_template = template_path and os.path.exists(template_path) and card_img.size == (CARD_WIDTH_PX, CARD_HEIGHT_PX)
+    # Dibujar elementos base si no hay plantilla efectiva
+    has_template = template_path and os.path.exists(template_path) and card_img.size == (CARD_WIDTH_PX, CARD_HEIGHT_PX) # Check again after potential resize/error
     if not has_template:
         draw.rectangle([0, 0, CARD_WIDTH_PX, 80], fill=(191, 2, 2))
         try:
             title_font = ImageFont.truetype("arialbd.ttf", size=32)
             draw.text((30, 25), "TARJETA DE REGALO NOVILLO ALEGRE", fill=(255,255,255), font=title_font)
-        except IOError: pass
+        except IOError: pass # Ignorar si la fuente no está
+
+    # Cargar fuentes principales
     try:
         main_font = ImageFont.truetype("arial.ttf", size=30)
         consecutive_font = ImageFont.truetype("arialbd.ttf", size=40)
     except IOError:
         main_font = consecutive_font = ImageFont.load_default()
 
+    # Generar QR
     qr = qrcode.QRCode(1, qrcode.constants.ERROR_CORRECT_M, 8, 2); qr.add_data(data_to_encode); qr.make(fit=True); qr_img = qr.make_image(fill_color="black", back_color="white").convert('RGB')
     QR_X = CARD_WIDTH_PX - QR_SIZE_PX - BORDER_PX; QR_Y = 100
     if has_template: PROMO_POS = (BORDER_PX, 400); EXP_POS = (BORDER_PX, 440); CONS_POS = (BORDER_PX, 480)
@@ -124,7 +128,7 @@ def format_receipt(receipt_data):
 # --- LÓGICA DE INICIALIZACIÓN Y LOGIN ---
 if 'logged_in' not in st.session_state: st.session_state['logged_in'] = False
 if 'user_role' not in st.session_state: st.session_state['user_role'] = None
-if 'username' not in st.session_state: st.session_state['username'] = 'N/A' # Default username
+if 'username' not in st.session_state: st.session_state['username'] = 'N/A'
 if 'user_id' not in st.session_state: st.session_state['user_id'] = None
 if 'branch_id' not in st.session_state: st.session_state['branch_id'] = None
 if not auth.is_authenticated():
@@ -141,17 +145,10 @@ with st.sidebar:
         if user_role == 'Admin': menu_options.extend(["🔑 Gestión de Usuarios", "⚙️ Configuración", "📊 Reportes"])
         if user_role in ['Admin', 'Creator']: menu_options.append("🛠️ Creador QR")
         if user_role in ['Admin', 'Cashier']: menu_options.append("📲 Escáner")
-        # Use index=0 to default to Dashboard if the previous selection is no longer valid
         current_selection_index = 0
         if 'app_mode_select' in st.session_state and st.session_state['app_mode_select'] in menu_options:
             current_selection_index = menu_options.index(st.session_state['app_mode_select'])
-
-        app_mode = st.sidebar.radio(
-            "Módulo",
-            menu_options,
-            key="app_mode_select",
-            index=current_selection_index
-        )
+        app_mode = st.sidebar.radio("Módulo", menu_options, key="app_mode_select", index=current_selection_index)
         st.markdown("---");
         if st.button("Cerrar Sesión", key="logout_btn"): auth.sign_out()
     else: st.error("Error rol."); auth.sign_out(); st.stop()
@@ -162,9 +159,11 @@ with st.sidebar:
 
 if app_mode == "🏠 Dashboard": st.header("Bienvenido al Sistema")
 elif app_mode == "🔑 Gestión de Usuarios":
-    # Ensure user_service is imported before calling its function
-    user_service.render_user_management() # Call the user management render function
-elif app_mode == "⚙️ Configuración": db_service.render_config_management()
+    # Llamar a la función desde user_service.py
+    user_service.render_user_management()
+elif app_mode == "⚙️ Configuración":
+    # Llamar a la función desde db_service.py
+    db_service.render_config_management()
 elif app_mode == "📲 Escáner":
     st.header("Abrir Aplicación de Escáner")
     st.markdown("Presione el botón para abrir la aplicación web de escaneo.")
@@ -177,8 +176,8 @@ elif app_mode == "🛠️ Creador QR":
     promos = db_service.get_promos(); branches = db_service.get_branches()
     types = db_service.get_types(); scopes = db_service.get_validity_scopes()
     restrictions = db_service.get_restrictions()
-    promo_options = {p['type_name']: p for p in promos if p.get('type_name')} # Ensure name exists
-    branch_options = [b['name'] for b in branches if b.get('name')]
+    promo_options = {p['type_name']: p for p in promos if p.get('type_name')}
+    branch_options = sorted([b['name'] for b in branches if b.get('name')]) # Sort branch names
     type_options = {t['type_name']: t['id'] for t in types if t.get('type_name')}
     scope_options = {s['scope_name']: s['id'] for s in scopes if s.get('scope_name')}
     restriction_options = {r['restriction_description']: r['id'] for r in restrictions if r.get('restriction_description')}
@@ -193,15 +192,14 @@ elif app_mode == "🛠️ Creador QR":
         form_key = f"qr_creator_form_{st.session_state['form_key_counter']}"
 
         # --- Live Calculation Display Area (Outside Form) ---
-        # Get current values from state (widgets update state via key)
+        st.subheader("Cálculo Estimado")
+        calc_placeholder = st.empty() # Placeholder to show calculation or prompt
+        # Read current potential values directly from state using form keys
         live_promo_name = st.session_state.get(f"{form_key}_promo", "-- Seleccione Promoción --")
         live_promo_data = promo_options.get(live_promo_name, {})
         live_vcrc = st.session_state.get(f"{form_key}_vcrc") # Can be None
         live_vusd = st.session_state.get(f"{form_key}_vusd") # Can be None
         live_count = st.session_state.get(f'{form_key}_count') # Can be None
-
-        st.subheader("Cálculo Estimado")
-        calc_placeholder = st.empty() # Placeholder to show calculation or prompt
 
         # Perform calculation only if all required inputs are valid numbers > 0
         if (live_promo_name != "-- Seleccione Promoción --" and
@@ -231,45 +229,69 @@ elif app_mode == "🛠️ Creador QR":
         # clear_on_submit=False allows retaining values on validation error
         with st.form(form_key, clear_on_submit=False):
             st.subheader("Configuración del Lote")
-            promo_list = ["-- Seleccione Promoción --"] + sorted(list(promo_options.keys())) # Sort options
+            promo_list = ["-- Seleccione Promoción --"] + sorted(list(promo_options.keys()))
             type_list = ["-- Seleccione Tipo --"] + sorted(list(type_options.keys()))
             scope_list = sorted(list(scope_options.keys()))
             restriction_list = sorted(list(restriction_options.keys()))
 
-            # Removed optional batch name input
-            # Use state key for persistence on error
+            # Inputs (removed optional batch name)
             input_asociado = st.text_input("**Asociado o Comprador (*Obligatorio*)**", key=f"{form_key}_asoc")
 
             col1, col2 = st.columns(2)
             with col1:
                 selected_promo_name = st.selectbox("Promoción/Diseño (*Obligatorio*)", options=promo_list, index=0, key=f"{form_key}_promo")
                 st.caption(f"Descripción (Canje): {promo_options.get(selected_promo_name, {}).get('description', 'N/A')}")
-                # Use state key for persistence on error
+                # Value must be >= 0.00
                 value_crc = st.number_input("Valor Base CRC (*Obligatorio*)", min_value=0.0, format="%.2f", value=st.session_state.get(f"{form_key}_vcrc"), placeholder="0.00", key=f"{form_key}_vcrc")
                 value_usd = st.number_input("Valor Base USD (*Obligatorio*)", min_value=0.0, format="%.2f", value=st.session_state.get(f"{form_key}_vusd"), placeholder="0.00", key=f"{form_key}_vusd")
 
             with col2:
                 valid_months = st.selectbox("Meses Vigencia (*Obligatorio*)", options=[3, 6, 9, 12], index=0, key=f"{form_key}_months")
                 selected_type_name = st.selectbox("Tipo/Campaña (*Obligatorio*)", options=type_list, index=0, key=f"{form_key}_type")
-                # Add checkbox for "All Branches"
-                all_branches_selected = st.checkbox("Permitir en Todas las Sucursales", key=f"{form_key}_all_branches", value=False) # Default to specific selection
+                all_branches_selected = st.checkbox("Permitir en Todas las Sucursales", key=f"{form_key}_all_branches", value=False)
                 allowed_branches = st.multiselect(
                     "Sucursales Permitidas (Obligatorio si 'Todas' no está marcado)",
-                    options=branch_options,
-                    key=f"{form_key}_branches",
-                    disabled=all_branches_selected # Disable if "All" is checked
+                    options=branch_options, key=f"{form_key}_branches", disabled=all_branches_selected
                  )
-                # Make Scope and Restriction mandatory
                 selected_scope_names = st.multiselect("Validez Cupón (*Obligatorio*)", options=scope_list, key=f"{form_key}_scopes")
                 selected_restriction_names = st.multiselect("Restricciones (*Obligatorio*)", options=restriction_list, key=f"{form_key}_restrictions")
                 count = st.number_input("Cantidad (*Obligatorio*)", min_value=1, max_value=1000, value=st.session_state.get(f'{form_key}_count'), placeholder="1", key=f'{form_key}_count')
 
+            # --- Calculation Display (Inside Form) ---
+            # Duplicated here to show calculation within the form scope as well
+            st.divider()
+            st.subheader("Cálculo Estimado (Dentro del Form)")
+            live_promo_name_calc_in = st.session_state.get(f"{form_key}_promo", "-- Seleccione Promoción --")
+            live_promo_data_calc_in = promo_options.get(live_promo_name_calc_in, {})
+            live_vcrc_calc_in = st.session_state.get(f"{form_key}_vcrc")
+            live_vusd_calc_in = st.session_state.get(f"{form_key}_vusd")
+            live_count_calc_in = st.session_state.get(f'{form_key}_count')
+            if (live_promo_name_calc_in != "-- Seleccione Promoción --" and
+                    isinstance(live_vcrc_calc_in, (int, float)) and live_vcrc_calc_in >= 0 and
+                    isinstance(live_vusd_calc_in, (int, float)) and live_vusd_calc_in >= 0 and
+                    isinstance(live_count_calc_in, int) and live_count_calc_in > 0):
+                disc_crc_calc_in = db_service.calculate_discount_per_coupon(live_vcrc_calc_in, live_promo_data_calc_in)
+                disc_usd_calc_in = db_service.calculate_discount_per_coupon(live_vusd_calc_in, live_promo_data_calc_in)
+                total_sale_crc_calc_in = round((live_vcrc_calc_in * live_count_calc_in) - (disc_crc_calc_in * live_count_calc_in), 2)
+                total_sale_usd_calc_in = round((live_vusd_calc_in * live_count_calc_in) - (disc_usd_calc_in * live_count_calc_in), 2)
+                calc_col1_form_in, calc_col2_form_in = st.columns(2)
+                with calc_col1_form_in:
+                    st.metric(label="Desc. x Cupón (CRC)", value=f"₡ {disc_crc_calc_in:,.2f}")
+                    st.metric(label="Total Pagado (CRC)", value=f"₡ {total_sale_crc_calc_in:,.2f}")
+                with calc_col2_form_in:
+                    st.metric(label="Desc. x Cupón (USD)", value=f"$ {disc_usd_calc_in:,.2f}")
+                    st.metric(label="Total Pagado (USD)", value=f"$ {total_sale_usd_calc_in:,.2f}")
+            else: st.caption("ℹ️ Llene campos (*) para ver cálculo.")
+            st.divider()
+
+
+            # --- Submit Button ---
             submitted = st.form_submit_button("✔️ Generar Lote")
 
             if submitted:
-                # --- VALIDACIÓN FINAL (Todos los campos requeridos) ---
+                # --- VALIDACIÓN FINAL ---
                 error = False
-                # Re-fetch values using keys from CURRENT state inside submission block
+                # Re-fetch values using keys
                 asoc_val = st.session_state[f"{form_key}_asoc"]
                 promo_val = st.session_state[f"{form_key}_promo"]
                 vcrc_val = st.session_state[f"{form_key}_vcrc"]
@@ -282,39 +304,33 @@ elif app_mode == "🛠️ Creador QR":
                 all_branches_val = st.session_state[f"{form_key}_all_branches"]
                 branches_val = st.session_state[f"{form_key}_branches"]
 
-
-                if not asoc_val: st.error("❌ 'Asociado' es obligatorio."); error = True
+                # Perform checks
+                if not asoc_val: st.error("❌ 'Asociado' obligatorio."); error = True
                 if not promo_val or promo_val == "-- Seleccione Promoción --": st.error("❌ Seleccione Promoción."); error = True
-                if vcrc_val is None or vcrc_val < 0: st.error("❌ Ingrese Valor Base CRC válido (puede ser 0.00)."); error = True
-                if vusd_val is None or vusd_val < 0: st.error("❌ Ingrese Valor Base USD válido (puede ser 0.00)."); error = True
-                if not type_val or type_val == "-- Seleccione Tipo --": st.error("❌ Seleccione Tipo/Campaña."); error = True
-                if count_val is None or count_val <= 0: st.error("❌ Ingrese Cantidad > 0."); error = True
-                if months_val is None: st.error("❌ Seleccione Meses de Vigencia."); error=True
-                # Mandatory validation for branches OR "all" checkbox
-                if not all_branches_val and not branches_val: st.error("❌ Seleccione al menos una Sucursal Permitida o marque 'Todas'."); error = True
-                if not scopes_val: st.error("❌ Seleccione al menos una opción de Validez Cupón."); error = True
-                if not restrictions_val: st.error("❌ Seleccione al menos una Restricción."); error = True
-
+                if vcrc_val is None or vcrc_val < 0: st.error("❌ Valor Base CRC >= 0.00."); error = True
+                if vusd_val is None or vusd_val < 0: st.error("❌ Valor Base USD >= 0.00."); error = True
+                if not type_val or type_val == "-- Seleccione Tipo --": st.error("❌ Seleccione Tipo."); error = True
+                if count_val is None or count_val <= 0: st.error("❌ Cantidad > 0."); error = True
+                if months_val is None: st.error("❌ Seleccione Meses."); error=True
+                if not all_branches_val and not branches_val: st.error("❌ Seleccione Sucursales o marque 'Todas'."); error = True
+                if not scopes_val: st.error("❌ Seleccione Validez."); error = True
+                if not restrictions_val: st.error("❌ Seleccione Restricciones."); error = True
 
                 if not error:
-                    # Proceed with generation
                     type_id = type_options.get(type_val)
                     user_id = st.session_state.get('user_id')
                     scope_ids = [scope_options[n] for n in scopes_val]
                     restriction_ids = [restriction_options[n] for n in restrictions_val]
-                    # Use branches_val ONLY if all_branches_val is False
                     branch_names_to_send = branches_val if not all_branches_val else []
                     selected_promo_data = promo_options.get(promo_val, {})
 
                     st.info(f"⚙️ Generando {count_val} tarjeta(s)... Por favor espere.")
-
                     result = db_service.create_coupon_batch(
-                        count=count_val, asociado_comprador=asoc_val, # Pass asociado
+                        count=count_val, asociado_comprador=asoc_val,
                         promo_data=selected_promo_data, value_crc=vcrc_val, value_usd=vusd_val,
-                        type_id=type_id, months_valid=months_val, branch_names=branch_names_to_send, # Send specific or empty list
+                        type_id=type_id, months_valid=months_val, branch_names=branch_names_to_send,
                         scope_ids=scope_ids, restriction_ids=restriction_ids, user_id=user_id
                     )
-
                     if result and result.get('coupon_entries'):
                         st.success("✅ ¡Lote y recibo generados!")
                         st.balloons()
@@ -333,17 +349,22 @@ elif app_mode == "🛠️ Creador QR":
                         st.session_state['show_receipt'] = True
                         st.session_state['last_zip_buffer'] = zip_buffer
                         st.session_state['last_zip_filename'] = zip_filename
-                        # Reset calculation state
-                        st.session_state[f'{form_key}_promo'] = "-- Seleccione Promoción --"
-                        st.session_state[f'{form_key}_vcrc'] = None; st.session_state[f'{form_key}_vusd'] = None
-                        st.session_state[f'{form_key}_count'] = None; st.session_state[f'{form_key}_asoc'] = ""
-                        st.session_state[f'{form_key}_scopes'] = []; st.session_state[f'{form_key}_restrictions'] = []
-                        st.session_state[f'{form_key}_branches'] = []; st.session_state[f'{form_key}_all_branches'] = False
-                        # Increment form key counter to force form reset on rerun
+                        # Clear form fields manually by resetting state associated with the form key
+                        st.session_state[f"{form_key}_asoc"] = ""
+                        st.session_state[f"{form_key}_promo"] = "-- Seleccione Promoción --"
+                        st.session_state[f"{form_key}_vcrc"] = None
+                        st.session_state[f"{form_key}_vusd"] = None
+                        st.session_state[f"{form_key}_months"] = 3
+                        st.session_state[f"{form_key}_type"] = "-- Seleccione Tipo --"
+                        st.session_state[f"{form_key}_all_branches"] = False
+                        st.session_state[f"{form_key}_branches"] = []
+                        st.session_state[f"{form_key}_scopes"] = []
+                        st.session_state[f"{form_key}_restrictions"] = []
+                        st.session_state[f'{form_key}_count'] = None
                         st.session_state['form_key_counter'] += 1
-                        st.rerun() # Rerun to display receipt and clear form
+                        st.rerun() # Rerun to display receipt and use new form key
                     else:
-                        st.error("🚨 Error al generar el lote. Revise los mensajes."); st.session_state['show_receipt'] = False
+                        st.error("🚨 Error al generar el lote. Campos NO borrados. Revise mensajes."); st.session_state['show_receipt'] = False
 
         # --- Display Receipt and Download (Outside Form) ---
         if st.session_state.get('show_receipt') and st.session_state.get('last_receipt_data'):
@@ -361,7 +382,7 @@ elif app_mode == "🛠️ Creador QR":
             if st.button("✨ Listo (Ocultar Recibo)"):
                 st.session_state['show_receipt'] = False; st.session_state['last_receipt_data'] = None
                 st.session_state['last_zip_buffer'] = None; st.session_state['last_zip_filename'] = None
-                st.session_state['form_key_counter'] += 1 # Increment key again helps ensure reset
+                st.session_state['form_key_counter'] += 1
                 st.rerun()
 
     # --- Gestión de Plantilla ---
@@ -403,7 +424,6 @@ elif app_mode == "📊 Reportes":
         coupon_filter_string = "&".join(coupon_filters)
         df_coupons = db_service.get_activity_report(coupon_filter_string)
         if not df_coupons.empty:
-            # Display DataFrame, ensuring 'Sucursales Permitidas' is shown
             st.dataframe(df_coupons, use_container_width=True, hide_index=True)
             total_qrs = len(df_coupons); redeemed_qrs = df_coupons['is_redeemed'].sum()
             c1, c2 = st.columns(2); c1.metric("Total", f"{total_qrs} 🎟️"); c2.metric("Canjeados", f"{redeemed_qrs} ✅")
@@ -414,15 +434,12 @@ elif app_mode == "📊 Reportes":
         st.subheader("Resumen de Lotes Creados")
         df_batches = db_service.get_batch_report()
         if not df_batches.empty:
-            # Format numeric columns before display
-            num_cols_crc = ['Ref CRC', 'Venta CRC']
-            num_cols_usd = ['Ref USD', 'Venta USD']
-            # Create a copy to avoid modifying the original DataFrame used elsewhere
             df_display_batches = df_batches.copy()
+            num_cols_crc = ['Ref CRC', 'Venta CRC']; num_cols_usd = ['Ref USD', 'Venta USD']
             for col in num_cols_crc: df_display_batches[col] = pd.to_numeric(df_display_batches[col], errors='coerce').fillna(0).apply(lambda x: f"₡ {x:,.2f}")
             for col in num_cols_usd: df_display_batches[col] = pd.to_numeric(df_display_batches[col], errors='coerce').fillna(0).apply(lambda x: f"$ {x:,.2f}")
-
-            # Display formatted dataframe
+            df_display_batches['Creados'] = pd.to_numeric(df_display_batches['Creados'], errors='coerce').fillna(0).astype(int)
+            df_display_batches['Canjeados'] = pd.to_numeric(df_display_batches['Canjeados'], errors='coerce').fillna(0).astype(int)
             st.dataframe(df_display_batches.drop(columns=['ID Lote'], errors='ignore'), use_container_width=True, hide_index=True)
             total_lotes = len(df_batches); total_creados = pd.to_numeric(df_batches['Creados'], errors='coerce').sum(); total_canjeados = pd.to_numeric(df_batches['Canjeados'], errors='coerce').sum()
             c1,c2,c3 = st.columns(3); c1.metric("Lotes", f"{total_lotes}"); c2.metric("Total Creados", f"{int(total_creados)}"); c3.metric("Total Canjeados", f"{int(total_canjeados)}")
@@ -438,7 +455,7 @@ elif app_mode == "📊 Reportes":
             selected_receipt_display = st.selectbox("Seleccione el recibo:", options=receipt_display_list, index=0, key="receipt_selector")
             if selected_receipt_display != "-- Seleccione un Recibo --":
                 selected_receipt_id = receipt_options_dict[selected_receipt_display]
-                st.session_state['selected_receipt_id'] = selected_receipt_id # Store selection
+                st.session_state['selected_receipt_id'] = selected_receipt_id
                 if st.session_state['selected_receipt_id']:
                     receipt_data = db_service.get_receipt_data(st.session_state['selected_receipt_id'])
                     if receipt_data:
@@ -448,12 +465,3 @@ elif app_mode == "📊 Reportes":
                     else: st.error(f"No se cargaron detalles del recibo ID: {st.session_state['selected_receipt_id']}")
             else: st.session_state['selected_receipt_id'] = None; st.info("Seleccione un recibo.")
         else: st.warning("No hay recibos guardados.")
-
-# --- Módulo Gestión de Usuarios (placeholder for edit/delete) ---
-# This part needs the user_service.py update for edit/delete functionality
-elif app_mode == "🔑 Gestión de Usuarios":
-     if user_role != 'Admin':
-         st.error("Acceso denegado.")
-         st.stop()
-     # Call the render function from user_service which should now include edit/delete
-     user_service.render_user_management()
