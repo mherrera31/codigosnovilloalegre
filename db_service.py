@@ -1,4 +1,4 @@
-# db_service.py (VERSIÓN COMPLETA FINAL)
+# db_service.py (VERSIÓN COMPLETA FINAL - Consistent)
 import requests
 import streamlit as st
 import pandas as pd
@@ -161,7 +161,8 @@ def delete_entry(table_name: str, id_value: any, id_column: str = 'id'):
     try:
         response = requests.delete(url, headers=get_headers(token))
         response.raise_for_status()
-        return response.status_code == 204 # Check for success (No Content)
+        # Check if deletion actually happened (status code 204 No Content implies success)
+        return response.status_code == 204
     except requests.exceptions.HTTPError as err:
         try: error_msg = err.response.json().get('message', str(err.response.text))
         except: error_msg = str(err.response.text)
@@ -190,6 +191,7 @@ def get_next_consecutive():
 
 def calculate_discount_per_coupon(base_value: float, promo_data: dict):
     """Calcula SÓLO el monto del descuento por cupón."""
+    if base_value is None: base_value = 0.0 # Handle None case
     discount_v = promo_data.get('value', '0.0') # Default to string '0.0'
     try:
         discount_v = float(discount_v)
@@ -213,9 +215,9 @@ def create_coupon_batch(
     value_usd: float,
     type_id: int,
     months_valid: int,
-    branch_names: list,
-    scope_ids: list,
-    restriction_ids: list,
+    branch_names: list, # Can be empty for "All"
+    scope_ids: list, # Now mandatory
+    restriction_ids: list, # Now mandatory
     user_id: str
 ):
     """Genera lote, cupones, relaciones M:M y RECIBO."""
@@ -242,7 +244,6 @@ def create_coupon_batch(
 
         # 3. GENERAR BATCH NAME (Siempre autogenerado con Asociado)
         base_name_part = f"{promo_data.get('type_name', 'Lote')}"
-        # Asociado es ahora obligatorio, no necesitamos el check if
         base_name = f"{asociado_comprador.strip()}_{base_name_part}"
         final_batch_name = f"{base_name}_{datetime.now().strftime('%Y%m%d%H%M')}_{batch_uuid[:4]}"
 
@@ -251,7 +252,8 @@ def create_coupon_batch(
             'id': batch_uuid, 'batch_name': final_batch_name,
             'json_qrs': {'count': count, 'promo_description': promo_data.get('description', '')},
             'consecutive_start': start_consecutive, 'consecutive_end': end_consecutive,
-            'branch_ids': allowed_branch_ids if allowed_branch_ids else None, # Use None if empty list causes issues
+            # Use None if allowed_branch_ids is empty, Supabase often handles empty array as NULL
+            'branch_ids': allowed_branch_ids if allowed_branch_ids else None,
             'expiration_date': expiration_date, 'type_id': type_id, 'created_by_user_id': user_id,
             'sale_value_basis_crc': sale_basis_crc, 'sale_value_basis_usd': sale_basis_usd,
             'total_ref_value_crc': total_ref_crc, 'total_ref_value_usd': total_ref_usd,
@@ -266,11 +268,14 @@ def create_coupon_batch(
         coupon_entries, scopes_entries, restrictions_entries = [], [], []
         for i in range(count):
             c_uuid = str(uuid.uuid4()); cons = start_consecutive + i
+            # Use None for branch_permissions if allowed_branch_ids is empty
             coupon_entries.append({'id': c_uuid, 'batch_id': batch_uuid, 'consecutive': cons, 'promo_type_id': promo_data.get('id'), 'branch_permissions': allowed_branch_ids if allowed_branch_ids else None, 'base_value_colones': value_crc, 'base_value_dolares': value_usd, 'expiration_date': expiration_date, 'creation_date': current_timestamp_iso})
+            # Scope IDs and Restriction IDs are now mandatory (checked in app.py)
             for s_id in scope_ids: scopes_entries.append({'coupon_id': c_uuid, 'scope_id': s_id})
             for r_id in restriction_ids: restrictions_entries.append({'coupon_id': c_uuid, 'restriction_id': r_id})
         headers = get_headers(token)
         requests.post(f"{POSTGREST_ENDPOINT}/coupons", headers=headers, data=json.dumps(coupon_entries)).raise_for_status()
+        # Only insert if lists are not empty (shouldn't happen with mandatory validation)
         if scopes_entries: requests.post(f"{POSTGREST_ENDPOINT}/coupon_scopes", headers=headers, data=json.dumps(scopes_entries)).raise_for_status()
         if restrictions_entries: requests.post(f"{POSTGREST_ENDPOINT}/coupon_restrictions", headers=headers, data=json.dumps(restrictions_entries)).raise_for_status()
 
@@ -327,12 +332,14 @@ def get_activity_report(filters: str):
 
         # --- Mapear Sucursales Permitidas ---
         def map_branch_permissions(ids):
-            if ids is None: return "Todas" # Consider None as 'Todas'
+            if ids is None: return "Todas"
             if isinstance(ids, list):
-                if not ids: return "Todas" # Empty list also means 'Todas'
+                if not ids: return "Todas"
+                # Ensure IDs are strings before mapping
                 return ", ".join(sorted([branch_map.get(str(bid), f"ID:{bid}") for bid in ids]))
             return "Error Formato"
         df['Sucursales Permitidas'] = df['branch_permissions'].apply(map_branch_permissions)
+
 
         # Formatear fechas
         for col in ['creation_date', 'expiration_date', 'redemption_date']:
@@ -447,7 +454,6 @@ def render_config_management():
         col1, col2 = st.columns(2)
         with col1:
             st.markdown("#### Crear Nueva Sucursal")
-            # Use unique key for the form
             with st.form("branch_form_create", clear_on_submit=True):
                 branch_name = st.text_input("Nombre de la Sucursal")
                 branch_address = st.text_area("Dirección")
@@ -463,7 +469,6 @@ def render_config_management():
         st.markdown("#### Editar / Eliminar Sucursales")
         if branches_data:
             for branch in branches_data:
-                # Use unique key combining prefix and ID for expanders and forms
                 expander_key = f"exp_b_{branch['id']}"
                 form_key_edit = f"edit_branch_{branch['id']}"
                 with st.expander(f"ID {branch['id']} - {branch['name']}", key=expander_key):
@@ -473,25 +478,16 @@ def render_config_management():
                         cols = st.columns(2)
                         with cols[0]: save_clicked = st.form_submit_button("Guardar Cambios", type="primary", key=f"save_b_{branch['id']}")
                         with cols[1]: delete_clicked = st.form_submit_button("Eliminar Sucursal", key=f"del_b_{branch['id']}")
-
                         if save_clicked:
-                            if update_entry('branches', branch['id'], {'name': new_name, 'address': new_address}):
-                                st.success("Actualizado con éxito.")
-                                st.rerun()
-
+                            if update_entry('branches', branch['id'], {'name': new_name, 'address': new_address}): st.success("Actualizado."); st.rerun()
                         if delete_clicked:
-                            st.warning("¡Esta acción es irreversible!")
-                            # Use session state to manage confirmation for robustness across reruns
+                            st.warning("¡Irreversible!")
                             confirm_key = f"del_confirm_b_{branch['id']}"
-                            st.session_state[confirm_key] = st.checkbox("Sí, deseo eliminar esta sucursal.", key=f"cb_{confirm_key}")
+                            # Initialize confirmation state if not present
+                            if confirm_key not in st.session_state: st.session_state[confirm_key] = False
+                            st.session_state[confirm_key] = st.checkbox("Sí, deseo eliminar.", key=f"cb_{confirm_key}", value=st.session_state[confirm_key])
                             if st.session_state[confirm_key]:
-                                if delete_entry('branches', branch['id']):
-                                    st.success("Sucursal eliminada.")
-                                    # Reset confirmation state after successful deletion
-                                    st.session_state[confirm_key] = False
-                                    st.rerun()
-                                else:
-                                    st.error("Error al eliminar.") # Error message from delete_entry
+                                if delete_entry('branches', branch['id']): st.success("Eliminado."); st.session_state[confirm_key] = False; st.rerun()
         else: st.info("No hay sucursales para editar/eliminar.")
 
     # --- TIPOS/CAMPAÑAS ---
@@ -526,10 +522,10 @@ def render_config_management():
                         if delete_clicked:
                             st.warning("¡Irreversible!")
                             confirm_key = f"del_confirm_t_{type_item['id']}"
-                            st.session_state[confirm_key] = st.checkbox("Confirmar eliminación.", key=f"cb_{confirm_key}")
+                            if confirm_key not in st.session_state: st.session_state[confirm_key] = False
+                            st.session_state[confirm_key] = st.checkbox("Confirmar eliminación.", key=f"cb_{confirm_key}", value=st.session_state[confirm_key])
                             if st.session_state[confirm_key]:
-                                if delete_entry('types', type_item['id']):
-                                    st.success("Eliminado."); st.session_state[confirm_key] = False; st.rerun()
+                                if delete_entry('types', type_item['id']): st.success("Eliminado."); st.session_state[confirm_key] = False; st.rerun()
         else: st.info("No hay tipos/campañas para editar/eliminar.")
 
     # --- PROMOCIONES ---
@@ -580,7 +576,8 @@ def render_config_management():
                         if delete_button:
                             st.warning("¡Irreversible!")
                             confirm_key = f"del_confirm_p_{promo['id']}"
-                            st.session_state[confirm_key] = st.checkbox("Confirmar eliminación.", key=f"cb_{confirm_key}")
+                            if confirm_key not in st.session_state: st.session_state[confirm_key] = False
+                            st.session_state[confirm_key] = st.checkbox("Confirmar eliminación.", key=f"cb_{confirm_key}", value=st.session_state[confirm_key])
                             if st.session_state[confirm_key]:
                                 if delete_entry('promos', promo['id']): st.success("Eliminado."); st.session_state[confirm_key] = False; st.rerun()
         else: st.info("No hay promociones para editar/eliminar.")
@@ -617,7 +614,8 @@ def render_config_management():
                         if delete_clicked:
                             st.warning("¡Irreversible!")
                             confirm_key = f"del_confirm_s_{scope['id']}"
-                            st.session_state[confirm_key] = st.checkbox("Confirmar eliminación.", key=f"cb_{confirm_key}")
+                            if confirm_key not in st.session_state: st.session_state[confirm_key] = False
+                            st.session_state[confirm_key] = st.checkbox("Confirmar eliminación.", key=f"cb_{confirm_key}", value=st.session_state[confirm_key])
                             if st.session_state[confirm_key]:
                                 if delete_entry('validity_scopes', scope['id']): st.success("Eliminado."); st.session_state[confirm_key] = False; st.rerun()
         else: st.info("No hay alcances para editar/eliminar.")
@@ -643,7 +641,8 @@ def render_config_management():
         st.markdown("#### Editar / Eliminar Restricciones")
         if restrictions_data:
              for restriction in restrictions_data:
-                 with st.expander(f"ID {restriction['id']} - {restriction.get('restriction_description','(Sin descripción)')[:50]}...", key=f"exp_r_{restriction['id']}"): # Show truncated desc
+                 desc_short = restriction.get('restriction_description','')[:50]
+                 with st.expander(f"ID {restriction['id']} - {desc_short}...", key=f"exp_r_{restriction['id']}"):
                     with st.form(f"edit_restriction_{restriction['id']}"):
                         new_desc = st.text_area("Descripción", value=restriction.get('restriction_description',''), key=f"desc_r_{restriction['id']}")
                         cols = st.columns(2)
@@ -654,7 +653,8 @@ def render_config_management():
                         if delete_clicked:
                             st.warning("¡Irreversible!")
                             confirm_key = f"del_confirm_r_{restriction['id']}"
-                            st.session_state[confirm_key] = st.checkbox("Confirmar eliminación.", key=f"cb_{confirm_key}")
+                            if confirm_key not in st.session_state: st.session_state[confirm_key] = False
+                            st.session_state[confirm_key] = st.checkbox("Confirmar eliminación.", key=f"cb_{confirm_key}", value=st.session_state[confirm_key])
                             if st.session_state[confirm_key]:
                                 if delete_entry('restrictions', restriction['id']): st.success("Eliminado."); st.session_state[confirm_key] = False; st.rerun()
         else: st.info("No hay restricciones para editar/eliminar.")
