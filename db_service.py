@@ -1,4 +1,4 @@
-# db_service.py (VERSIÓN COMPLETA FINAL - Consistent)
+# db_service.py (VERSIÓN CORREGIDA - Sin 'key' en Expander de Config)
 import requests
 import streamlit as st
 import pandas as pd
@@ -252,13 +252,12 @@ def create_coupon_batch(
             'id': batch_uuid, 'batch_name': final_batch_name,
             'json_qrs': {'count': count, 'promo_description': promo_data.get('description', '')},
             'consecutive_start': start_consecutive, 'consecutive_end': end_consecutive,
-            # Use None if allowed_branch_ids is empty, Supabase often handles empty array as NULL
             'branch_ids': allowed_branch_ids if allowed_branch_ids else None,
             'expiration_date': expiration_date, 'type_id': type_id, 'created_by_user_id': user_id,
             'sale_value_basis_crc': sale_basis_crc, 'sale_value_basis_usd': sale_basis_usd,
             'total_ref_value_crc': total_ref_crc, 'total_ref_value_usd': total_ref_usd,
             'total_sale_value_crc': total_sale_crc, 'total_sale_value_usd': total_sale_usd,
-            'creation_date': current_timestamp_iso # Explicit creation date for batch
+            'creation_date': current_timestamp_iso
         }
         created_batch_result = create_entry('batches', batch_payload, return_representation=True)
         if not created_batch_result: raise Exception("Fallo al crear el registro del lote (batches).")
@@ -268,14 +267,11 @@ def create_coupon_batch(
         coupon_entries, scopes_entries, restrictions_entries = [], [], []
         for i in range(count):
             c_uuid = str(uuid.uuid4()); cons = start_consecutive + i
-            # Use None for branch_permissions if allowed_branch_ids is empty
             coupon_entries.append({'id': c_uuid, 'batch_id': batch_uuid, 'consecutive': cons, 'promo_type_id': promo_data.get('id'), 'branch_permissions': allowed_branch_ids if allowed_branch_ids else None, 'base_value_colones': value_crc, 'base_value_dolares': value_usd, 'expiration_date': expiration_date, 'creation_date': current_timestamp_iso})
-            # Scope IDs and Restriction IDs are now mandatory (checked in app.py)
             for s_id in scope_ids: scopes_entries.append({'coupon_id': c_uuid, 'scope_id': s_id})
             for r_id in restriction_ids: restrictions_entries.append({'coupon_id': c_uuid, 'restriction_id': r_id})
         headers = get_headers(token)
         requests.post(f"{POSTGREST_ENDPOINT}/coupons", headers=headers, data=json.dumps(coupon_entries)).raise_for_status()
-        # Only insert if lists are not empty (shouldn't happen with mandatory validation)
         if scopes_entries: requests.post(f"{POSTGREST_ENDPOINT}/coupon_scopes", headers=headers, data=json.dumps(scopes_entries)).raise_for_status()
         if restrictions_entries: requests.post(f"{POSTGREST_ENDPOINT}/coupon_restrictions", headers=headers, data=json.dumps(restrictions_entries)).raise_for_status()
 
@@ -335,7 +331,6 @@ def get_activity_report(filters: str):
             if ids is None: return "Todas"
             if isinstance(ids, list):
                 if not ids: return "Todas"
-                # Ensure IDs are strings before mapping
                 return ", ".join(sorted([branch_map.get(str(bid), f"ID:{bid}") for bid in ids]))
             return "Error Formato"
         df['Sucursales Permitidas'] = df['branch_permissions'].apply(map_branch_permissions)
@@ -469,11 +464,11 @@ def render_config_management():
         st.markdown("#### Editar / Eliminar Sucursales")
         if branches_data:
             for branch in branches_data:
-                expander_key = f"exp_b_{branch['id']}"
                 form_key_edit = f"edit_branch_{branch['id']}"
-                with st.expander(f"ID {branch['id']} - {branch['name']}", key=expander_key):
+                # --- ¡CORRECCIÓN AQUÍ! --- Remove key= argument from expander ---
+                with st.expander(f"ID {branch['id']} - {branch.get('name', 'N/A')}"):
                     with st.form(form_key_edit):
-                        new_name = st.text_input("Nombre", value=branch['name'], key=f"name_b_{branch['id']}")
+                        new_name = st.text_input("Nombre", value=branch.get('name', ''), key=f"name_b_{branch['id']}")
                         new_address = st.text_area("Dirección", value=branch.get('address', ''), key=f"addr_b_{branch['id']}")
                         cols = st.columns(2)
                         with cols[0]: save_clicked = st.form_submit_button("Guardar Cambios", type="primary", key=f"save_b_{branch['id']}")
@@ -483,7 +478,6 @@ def render_config_management():
                         if delete_clicked:
                             st.warning("¡Irreversible!")
                             confirm_key = f"del_confirm_b_{branch['id']}"
-                            # Initialize confirmation state if not present
                             if confirm_key not in st.session_state: st.session_state[confirm_key] = False
                             st.session_state[confirm_key] = st.checkbox("Sí, deseo eliminar.", key=f"cb_{confirm_key}", value=st.session_state[confirm_key])
                             if st.session_state[confirm_key]:
@@ -511,9 +505,10 @@ def render_config_management():
         st.markdown("#### Editar / Eliminar Tipos/Campañas")
         if types_data:
             for type_item in types_data:
-                with st.expander(f"ID {type_item['id']} - {type_item['type_name']}", key=f"exp_t_{type_item['id']}"):
+                 # --- ¡CORRECCIÓN AQUÍ! --- Remove key= argument from expander ---
+                with st.expander(f"ID {type_item['id']} - {type_item.get('type_name', 'N/A')}"):
                      with st.form(f"edit_type_{type_item['id']}"):
-                        new_name = st.text_input("Nombre", value=type_item['type_name'], key=f"name_t_{type_item['id']}")
+                        new_name = st.text_input("Nombre", value=type_item.get('type_name', ''), key=f"name_t_{type_item['id']}")
                         cols = st.columns(2)
                         with cols[0]: save_clicked = st.form_submit_button("Guardar", type="primary", key=f"save_t_{type_item['id']}")
                         with cols[1]: delete_clicked = st.form_submit_button("Eliminar", key=f"del_t_{type_item['id']}")
@@ -557,11 +552,12 @@ def render_config_management():
                 types = ["Porcentaje", "Valor Fijo", "Producto"]; idx = 0
                 if promo.get('is_cash_value'): idx = 1
                 elif promo.get('is_product'): idx = 2
-                with st.expander(f"ID {promo['id']} - {promo['type_name']}", key=f"exp_p_{promo['id']}"):
+                # --- ¡CORRECCIÓN AQUÍ! --- Remove key= argument from expander ---
+                with st.expander(f"ID {promo['id']} - {promo.get('type_name', 'N/A')}"):
                     with st.form(f"edit_promo_{promo['id']}"):
                         col_e1, col_e2 = st.columns([2,1])
                         with col_e1:
-                            e_name = st.text_input("Nombre", value=promo['type_name'], key=f"pn_{promo['id']}")
+                            e_name = st.text_input("Nombre", value=promo.get('type_name',''), key=f"pn_{promo['id']}")
                             e_desc = st.text_area("Descripción", value=promo.get('description',''), key=f"pd_{promo['id']}")
                         with col_e2:
                             e_value = st.number_input("Valor", value=float(promo.get('value', 0.0)), min_value=0.0, format="%.2f", key=f"pv_{promo['id']}")
@@ -603,9 +599,10 @@ def render_config_management():
         st.markdown("#### Editar / Eliminar Alcances")
         if scopes_data:
             for scope in scopes_data:
-                 with st.expander(f"ID {scope['id']} - {scope['scope_name']}", key=f"exp_s_{scope['id']}"):
+                 # --- ¡CORRECCIÓN AQUÍ! --- Remove key= argument from expander ---
+                 with st.expander(f"ID {scope['id']} - {scope.get('scope_name', 'N/A')}"):
                     with st.form(f"edit_scope_{scope['id']}"):
-                        new_name = st.text_input("Nombre", value=scope['scope_name'], key=f"name_s_{scope['id']}")
+                        new_name = st.text_input("Nombre", value=scope.get('scope_name', ''), key=f"name_s_{scope['id']}")
                         cols = st.columns(2)
                         with cols[0]: save_clicked = st.form_submit_button("Guardar", type="primary", key=f"save_s_{scope['id']}")
                         with cols[1]: delete_clicked = st.form_submit_button("Eliminar", key=f"del_s_{scope['id']}")
@@ -642,7 +639,8 @@ def render_config_management():
         if restrictions_data:
              for restriction in restrictions_data:
                  desc_short = restriction.get('restriction_description','')[:50]
-                 with st.expander(f"ID {restriction['id']} - {desc_short}...", key=f"exp_r_{restriction['id']}"):
+                 # --- ¡CORRECCIÓN AQUÍ! --- Remove key= argument from expander ---
+                 with st.expander(f"ID {restriction['id']} - {desc_short}..."):
                     with st.form(f"edit_restriction_{restriction['id']}"):
                         new_desc = st.text_area("Descripción", value=restriction.get('restriction_description',''), key=f"desc_r_{restriction['id']}")
                         cols = st.columns(2)
