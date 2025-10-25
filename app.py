@@ -1,4 +1,4 @@
-# app.py (VERSIÓN CORREGIDA - Sin Input Oculto, Limpieza Mejorada)
+# app.py (VERSIÓN CORREGIDA - Filtro de Defaults en Multiselect)
 import streamlit as st
 import auth
 import db_service
@@ -187,7 +187,6 @@ elif app_mode == "🛠️ Creador QR":
         form_key = f"qr_creator_form_{st.session_state['form_key_counter']}"
 
         # --- Form Definition ---
-        # clear_on_submit=False allows retaining values on validation error
         with st.form(form_key, clear_on_submit=False):
             st.subheader("Configuración del Lote")
             promo_list = ["-- Seleccione Promoción --"] + sorted(list(promo_options.keys()))
@@ -195,53 +194,51 @@ elif app_mode == "🛠️ Creador QR":
             scope_list = sorted(list(scope_options.keys()))
             restriction_list = sorted(list(restriction_options.keys()))
 
-            # --- Removed hidden text input ---
+            # Removed hidden text input
 
             # Inputs
-            # Get default value from state if clear_form_inputs is False
             default_asoc = "" if st.session_state.get('clear_form_inputs') else st.session_state.get(f"{form_key}_asoc", "")
             input_asociado = st.text_input("**Asociado o Comprador (*Obligatorio*)**", value=default_asoc, key=f"{form_key}_asoc")
 
             col1, col2 = st.columns(2)
             with col1:
-                # Get default index from state
                 promo_index = 0
-                if not st.session_state.get('clear_form_inputs') and st.session_state.get(f"{form_key}_promo") in promo_list:
-                    promo_index = promo_list.index(st.session_state.get(f"{form_key}_promo"))
+                current_promo_sel = st.session_state.get(f"{form_key}_promo")
+                if not st.session_state.get('clear_form_inputs') and current_promo_sel in promo_list: promo_index = promo_list.index(current_promo_sel)
                 selected_promo_name = st.selectbox("Promoción/Diseño (*Obligatorio*)", options=promo_list, index=promo_index, key=f"{form_key}_promo")
                 st.caption(f"Descripción (Canje): {promo_options.get(selected_promo_name, {}).get('description', 'N/A')}")
 
-                # Get default value from state
                 default_vcrc = None if st.session_state.get('clear_form_inputs') else st.session_state.get(f"{form_key}_vcrc")
                 default_vusd = None if st.session_state.get('clear_form_inputs') else st.session_state.get(f"{form_key}_vusd")
                 value_crc = st.number_input("Valor Base CRC (*Obligatorio*)", min_value=0.0, format="%.2f", value=default_vcrc, placeholder="0.00", key=f"{form_key}_vcrc")
                 value_usd = st.number_input("Valor Base USD (*Obligatorio*)", min_value=0.0, format="%.2f", value=default_vusd, placeholder="0.00", key=f"{form_key}_vusd")
 
             with col2:
-                # Get default index from state
-                months_index = 0
-                default_months = 3 if st.session_state.get('clear_form_inputs') else st.session_state.get(f"{form_key}_months", 3)
+                months_index = 0; default_months = 3 if st.session_state.get('clear_form_inputs') else st.session_state.get(f"{form_key}_months", 3)
                 if default_months in [3, 6, 9, 12]: months_index = [3, 6, 9, 12].index(default_months)
                 valid_months = st.selectbox("Meses Vigencia (*Obligatorio*)", options=[3, 6, 9, 12], index=months_index, key=f"{form_key}_months")
 
-                type_index = 0
-                if not st.session_state.get('clear_form_inputs') and st.session_state.get(f"{form_key}_type") in type_list:
-                    type_index = type_list.index(st.session_state.get(f"{form_key}_type"))
+                type_index = 0; current_type_sel = st.session_state.get(f"{form_key}_type")
+                if not st.session_state.get('clear_form_inputs') and current_type_sel in type_list: type_index = type_list.index(current_type_sel)
                 selected_type_name = st.selectbox("Tipo/Campaña (*Obligatorio*)", options=type_list, index=type_index, key=f"{form_key}_type")
 
                 default_all_branches = False if st.session_state.get('clear_form_inputs') else st.session_state.get(f"{form_key}_all_branches", False)
                 all_branches_selected = st.checkbox("Permitir en Todas las Sucursales", value=default_all_branches, key=f"{form_key}_all_branches")
 
-                default_branches = [] if st.session_state.get('clear_form_inputs') else st.session_state.get(f"{form_key}_branches", [])
+                # --- CORRECTED DEFAULTS FOR MULTISELECT ---
+                default_branches_raw = [] if st.session_state.get('clear_form_inputs') else st.session_state.get(f"{form_key}_branches", [])
+                default_branches = [b for b in default_branches_raw if b in branch_options] # Filter invalid options
                 allowed_branches = st.multiselect(
                     "Sucursales Permitidas (Obligatorio si 'Todas' no está marcado)",
                     options=branch_options, default=default_branches, key=f"{form_key}_branches", disabled=all_branches_selected
                  )
 
-                default_scopes = [] if st.session_state.get('clear_form_inputs') else st.session_state.get(f"{form_key}_scopes", [])
+                default_scopes_raw = [] if st.session_state.get('clear_form_inputs') else st.session_state.get(f"{form_key}_scopes", [])
+                default_scopes = [s for s in default_scopes_raw if s in scope_list] # Filter invalid options
                 selected_scope_names = st.multiselect("Validez Cupón (*Obligatorio*)", options=scope_list, default=default_scopes, key=f"{form_key}_scopes")
 
-                default_restrictions = [] if st.session_state.get('clear_form_inputs') else st.session_state.get(f"{form_key}_restrictions", [])
+                default_restrictions_raw = [] if st.session_state.get('clear_form_inputs') else st.session_state.get(f"{form_key}_restrictions", [])
+                default_restrictions = [r for r in default_restrictions_raw if r in restriction_list] # Filter invalid options
                 selected_restriction_names = st.multiselect("Restricciones (*Obligatorio*)", options=restriction_list, default=default_restrictions, key=f"{form_key}_restrictions")
 
                 default_count = None if st.session_state.get('clear_form_inputs') else st.session_state.get(f'{form_key}_count')
@@ -250,13 +247,12 @@ elif app_mode == "🛠️ Creador QR":
             # --- Live Calculation Display (Inside Form, Before Submit) ---
             st.divider()
             st.subheader("Cálculo Estimado")
-            # Read current values directly from state inside the form context
-            live_promo_name_calc = st.session_state.get(f"{form_key}_promo", "-- Seleccione Promoción --")
+            # Read values directly from widgets using their current values in this run
+            live_promo_name_calc = selected_promo_name
             live_promo_data_calc = promo_options.get(live_promo_name_calc, {})
-            # Get values directly from widgets for live calc
-            live_vcrc_calc = value_crc # Use value from number_input widget
-            live_vusd_calc = value_usd # Use value from number_input widget
-            live_count_calc = count   # Use value from number_input widget
+            live_vcrc_calc = value_crc
+            live_vusd_calc = value_usd
+            live_count_calc = count
 
             if (live_promo_name_calc != "-- Seleccione Promoción --" and
                     isinstance(live_vcrc_calc, (int, float)) and live_vcrc_calc >= 0 and
@@ -334,7 +330,6 @@ elif app_mode == "🛠️ Creador QR":
                 if not restrictions_val: st.error("❌ Seleccione Restricciones."); error = True
 
                 if not error:
-                    # Proceed with generation
                     type_id = type_options.get(type_val)
                     user_id = st.session_state.get('user_id')
                     scope_ids = [scope_options[n] for n in scopes_val]
@@ -376,7 +371,7 @@ elif app_mode == "🛠️ Creador QR":
                         st.session_state['show_receipt'] = False
                         st.session_state['clear_form_inputs'] = False # Ensure form isn't cleared on error
                 else:
-                    # Error occurred, ensure form is NOT cleared
+                    # Error occurred during validation, ensure form is NOT cleared
                     st.session_state['clear_form_inputs'] = False
 
 
@@ -401,6 +396,7 @@ elif app_mode == "🛠️ Creador QR":
                 st.rerun()
 
         # --- Reset clear flag after potential rerun ---
+        # Put this outside the receipt display block to ensure it runs even if receipt isn't shown
         if 'clear_form_inputs' in st.session_state:
              st.session_state['clear_form_inputs'] = False
 
