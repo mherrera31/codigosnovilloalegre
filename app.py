@@ -1,8 +1,8 @@
-# app.py (VERSIÓN COMPLETA FINAL - Restaurando render_config_management y render_user_management si estaban integrados)
+# app.py (VERSIÓN COMPLETA FINAL - Cálculo Detallado en Vivo)
 import streamlit as st
 import auth
 import db_service
-import user_service # Importar user_service
+import user_service # Import user_service here
 import requests
 import qrcode
 from PIL import Image, ImageDraw, ImageFont
@@ -127,10 +127,7 @@ def format_receipt(receipt_data):
 
 # --- LÓGICA DE INICIALIZACIÓN Y LOGIN ---
 if 'logged_in' not in st.session_state: st.session_state['logged_in'] = False
-if 'user_role' not in st.session_state: st.session_state['user_role'] = None
-if 'username' not in st.session_state: st.session_state['username'] = 'N/A'
-if 'user_id' not in st.session_state: st.session_state['user_id'] = None
-if 'branch_id' not in st.session_state: st.session_state['branch_id'] = None
+# ... (rest of state initialization)
 if not auth.is_authenticated():
     st.image(LOGO_URL, width=300); st.title("QR-Creator"); auth.login_ui(); st.stop()
 
@@ -158,12 +155,8 @@ with st.sidebar:
 # ----------------------------------------
 
 if app_mode == "🏠 Dashboard": st.header("Bienvenido al Sistema")
-elif app_mode == "🔑 Gestión de Usuarios":
-    # Llamar a la función desde user_service.py
-    user_service.render_user_management()
-elif app_mode == "⚙️ Configuración":
-    # Llamar a la función desde db_service.py
-    db_service.render_config_management()
+elif app_mode == "🔑 Gestión de Usuarios": user_service.render_user_management()
+elif app_mode == "⚙️ Configuración": db_service.render_config_management()
 elif app_mode == "📲 Escáner":
     st.header("Abrir Aplicación de Escáner")
     st.markdown("Presione el botón para abrir la aplicación web de escaneo.")
@@ -177,7 +170,7 @@ elif app_mode == "🛠️ Creador QR":
     types = db_service.get_types(); scopes = db_service.get_validity_scopes()
     restrictions = db_service.get_restrictions()
     promo_options = {p['type_name']: p for p in promos if p.get('type_name')}
-    branch_options = sorted([b['name'] for b in branches if b.get('name')]) # Sort branch names
+    branch_options = sorted([b['name'] for b in branches if b.get('name')])
     type_options = {t['type_name']: t['id'] for t in types if t.get('type_name')}
     scope_options = {s['scope_name']: s['id'] for s in scopes if s.get('scope_name')}
     restriction_options = {r['restriction_description']: r['id'] for r in restrictions if r.get('restriction_description')}
@@ -191,42 +184,7 @@ elif app_mode == "🛠️ Creador QR":
         if 'form_key_counter' not in st.session_state: st.session_state['form_key_counter'] = 0
         form_key = f"qr_creator_form_{st.session_state['form_key_counter']}"
 
-        # --- Live Calculation Display Area (Outside Form) ---
-        st.subheader("Cálculo Estimado")
-        calc_placeholder = st.empty() # Placeholder to show calculation or prompt
-        # Read current potential values directly from state using form keys
-        live_promo_name = st.session_state.get(f"{form_key}_promo", "-- Seleccione Promoción --")
-        live_promo_data = promo_options.get(live_promo_name, {})
-        live_vcrc = st.session_state.get(f"{form_key}_vcrc") # Can be None
-        live_vusd = st.session_state.get(f"{form_key}_vusd") # Can be None
-        live_count = st.session_state.get(f'{form_key}_count') # Can be None
-
-        # Perform calculation only if all required inputs are valid numbers > 0
-        if (live_promo_name != "-- Seleccione Promoción --" and
-                isinstance(live_vcrc, (int, float)) and live_vcrc >= 0 and
-                isinstance(live_vusd, (int, float)) and live_vusd >= 0 and
-                isinstance(live_count, int) and live_count > 0):
-            disc_crc = db_service.calculate_discount_per_coupon(live_vcrc, live_promo_data)
-            disc_usd = db_service.calculate_discount_per_coupon(live_vusd, live_promo_data)
-            total_sale_crc = round((live_vcrc * live_count) - (disc_crc * live_count), 2)
-            total_sale_usd = round((live_vusd * live_count) - (disc_usd * live_count), 2)
-
-            with calc_placeholder.container():
-                calc_col1, calc_col2 = st.columns(2)
-                with calc_col1:
-                    st.metric(label="Descuento x Cupón (CRC)", value=f"₡ {disc_crc:,.2f}")
-                    st.metric(label="Valor Total Pagado (CRC)", value=f"₡ {total_sale_crc:,.2f}")
-                with calc_col2:
-                    st.metric(label="Descuento x Cupón (USD)", value=f"$ {disc_usd:,.2f}")
-                    st.metric(label="Valor Total Pagado (USD)", value=f"$ {total_sale_usd:,.2f}")
-        else:
-             with calc_placeholder.container():
-                st.caption("ℹ️ Llene todos los campos marcados con (*) para ver el cálculo estimado.")
-        st.divider()
-
-
         # --- Form Definition ---
-        # clear_on_submit=False allows retaining values on validation error
         with st.form(form_key, clear_on_submit=False):
             st.subheader("Configuración del Lote")
             promo_list = ["-- Seleccione Promoción --"] + sorted(list(promo_options.keys()))
@@ -234,14 +192,16 @@ elif app_mode == "🛠️ Creador QR":
             scope_list = sorted(list(scope_options.keys()))
             restriction_list = sorted(list(restriction_options.keys()))
 
-            # Inputs (removed optional batch name)
+            # --- Workaround for Enter key ---
+            st.text_input("hidden_enter_trap", value="", type="password", label_visibility="collapsed")
+
+            # Inputs
             input_asociado = st.text_input("**Asociado o Comprador (*Obligatorio*)**", key=f"{form_key}_asoc")
 
             col1, col2 = st.columns(2)
             with col1:
                 selected_promo_name = st.selectbox("Promoción/Diseño (*Obligatorio*)", options=promo_list, index=0, key=f"{form_key}_promo")
                 st.caption(f"Descripción (Canje): {promo_options.get(selected_promo_name, {}).get('description', 'N/A')}")
-                # Value must be >= 0.00
                 value_crc = st.number_input("Valor Base CRC (*Obligatorio*)", min_value=0.0, format="%.2f", value=st.session_state.get(f"{form_key}_vcrc"), placeholder="0.00", key=f"{form_key}_vcrc")
                 value_usd = st.number_input("Valor Base USD (*Obligatorio*)", min_value=0.0, format="%.2f", value=st.session_state.get(f"{form_key}_vusd"), placeholder="0.00", key=f"{form_key}_vusd")
 
@@ -257,33 +217,60 @@ elif app_mode == "🛠️ Creador QR":
                 selected_restriction_names = st.multiselect("Restricciones (*Obligatorio*)", options=restriction_list, key=f"{form_key}_restrictions")
                 count = st.number_input("Cantidad (*Obligatorio*)", min_value=1, max_value=1000, value=st.session_state.get(f'{form_key}_count'), placeholder="1", key=f'{form_key}_count')
 
-            # --- Calculation Display (Inside Form) ---
-            # Duplicated here to show calculation within the form scope as well
+            # --- Live Calculation Display (Inside Form, Before Submit) ---
             st.divider()
-            st.subheader("Cálculo Estimado (Dentro del Form)")
-            live_promo_name_calc_in = st.session_state.get(f"{form_key}_promo", "-- Seleccione Promoción --")
-            live_promo_data_calc_in = promo_options.get(live_promo_name_calc_in, {})
-            live_vcrc_calc_in = st.session_state.get(f"{form_key}_vcrc")
-            live_vusd_calc_in = st.session_state.get(f"{form_key}_vusd")
-            live_count_calc_in = st.session_state.get(f'{form_key}_count')
-            if (live_promo_name_calc_in != "-- Seleccione Promoción --" and
-                    isinstance(live_vcrc_calc_in, (int, float)) and live_vcrc_calc_in >= 0 and
-                    isinstance(live_vusd_calc_in, (int, float)) and live_vusd_calc_in >= 0 and
-                    isinstance(live_count_calc_in, int) and live_count_calc_in > 0):
-                disc_crc_calc_in = db_service.calculate_discount_per_coupon(live_vcrc_calc_in, live_promo_data_calc_in)
-                disc_usd_calc_in = db_service.calculate_discount_per_coupon(live_vusd_calc_in, live_promo_data_calc_in)
-                total_sale_crc_calc_in = round((live_vcrc_calc_in * live_count_calc_in) - (disc_crc_calc_in * live_count_calc_in), 2)
-                total_sale_usd_calc_in = round((live_vusd_calc_in * live_count_calc_in) - (disc_usd_calc_in * live_count_calc_in), 2)
-                calc_col1_form_in, calc_col2_form_in = st.columns(2)
-                with calc_col1_form_in:
-                    st.metric(label="Desc. x Cupón (CRC)", value=f"₡ {disc_crc_calc_in:,.2f}")
-                    st.metric(label="Total Pagado (CRC)", value=f"₡ {total_sale_crc_calc_in:,.2f}")
-                with calc_col2_form_in:
-                    st.metric(label="Desc. x Cupón (USD)", value=f"$ {disc_usd_calc_in:,.2f}")
-                    st.metric(label="Total Pagado (USD)", value=f"$ {total_sale_usd_calc_in:,.2f}")
-            else: st.caption("ℹ️ Llene campos (*) para ver cálculo.")
-            st.divider()
+            st.subheader("Cálculo Estimado")
+            # Read current values directly from state inside the form context
+            live_promo_name_calc = st.session_state.get(f"{form_key}_promo", "-- Seleccione Promoción --")
+            live_promo_data_calc = promo_options.get(live_promo_name_calc, {})
+            live_vcrc_calc = st.session_state.get(f"{form_key}_vcrc")
+            live_vusd_calc = st.session_state.get(f"{form_key}_vusd")
+            live_count_calc = st.session_state.get(f'{form_key}_count')
 
+            # --- Display calculation if valid inputs ---
+            if (live_promo_name_calc != "-- Seleccione Promoción --" and
+                    isinstance(live_vcrc_calc, (int, float)) and live_vcrc_calc >= 0 and
+                    isinstance(live_vusd_calc, (int, float)) and live_vusd_calc >= 0 and
+                    isinstance(live_count_calc, int) and live_count_calc > 0):
+
+                # Individual calculations
+                disc_crc_calc = db_service.calculate_discount_per_coupon(live_vcrc_calc, live_promo_data_calc)
+                disc_usd_calc = db_service.calculate_discount_per_coupon(live_vusd_calc, live_promo_data_calc)
+                sale_crc_individual = round(live_vcrc_calc - disc_crc_calc, 2)
+                sale_usd_individual = round(live_vusd_calc - disc_usd_calc, 2)
+
+                # Total calculations
+                base_total_crc_calc = round(live_vcrc_calc * live_count_calc, 2)
+                base_total_usd_calc = round(live_vusd_calc * live_count_calc, 2)
+                total_discount_crc_calc = round(disc_crc_calc * live_count_calc, 2)
+                total_discount_usd_calc = round(disc_usd_calc * live_count_calc, 2)
+                total_sale_crc_calc = round(base_total_crc_calc - total_discount_crc_calc, 2)
+                total_sale_usd_calc = round(base_total_usd_calc - total_discount_usd_calc, 2)
+
+                st.markdown("**Costo Individual**")
+                calc_col1_ind, calc_col2_ind = st.columns(2)
+                with calc_col1_ind:
+                    st.metric(label="Valor Base (CRC)", value=f"₡ {live_vcrc_calc:,.2f}")
+                    st.metric(label="Descuento (CRC)", value=f"₡ {disc_crc_calc:,.2f}")
+                    st.metric(label="Total Pagado (CRC)", value=f"₡ {sale_crc_individual:,.2f}")
+                with calc_col2_ind:
+                    st.metric(label="Valor Base (USD)", value=f"$ {live_vusd_calc:,.2f}")
+                    st.metric(label="Descuento (USD)", value=f"$ {disc_usd_calc:,.2f}")
+                    st.metric(label="Total Pagado (USD)", value=f"$ {sale_usd_individual:,.2f}")
+
+                st.markdown(f"**Costo Lote ({live_count_calc} cupones)**")
+                calc_col1_tot, calc_col2_tot = st.columns(2)
+                with calc_col1_tot:
+                    st.metric(label="Valor Base Total (CRC)", value=f"₡ {base_total_crc_calc:,.2f}")
+                    st.metric(label="Descuento Total (CRC)", value=f"₡ {total_discount_crc_calc:,.2f}")
+                    st.metric(label="Valor Total Pagado (CRC)", value=f"₡ {total_sale_crc_calc:,.2f}")
+                with calc_col2_tot:
+                    st.metric(label="Valor Base Total (USD)", value=f"$ {base_total_usd_calc:,.2f}")
+                    st.metric(label="Descuento Total (USD)", value=f"$ {total_discount_usd_calc:,.2f}")
+                    st.metric(label="Valor Total Pagado (USD)", value=f"$ {total_sale_usd_calc:,.2f}")
+            else:
+                 st.caption("ℹ️ Llene todos los campos (*) para ver el cálculo.")
+            st.divider()
 
             # --- Submit Button ---
             submitted = st.form_submit_button("✔️ Generar Lote")
@@ -349,19 +336,25 @@ elif app_mode == "🛠️ Creador QR":
                         st.session_state['show_receipt'] = True
                         st.session_state['last_zip_buffer'] = zip_buffer
                         st.session_state['last_zip_filename'] = zip_filename
-                        # Clear form fields manually by resetting state associated with the form key
-                        st.session_state[f"{form_key}_asoc"] = ""
-                        st.session_state[f"{form_key}_promo"] = "-- Seleccione Promoción --"
-                        st.session_state[f"{form_key}_vcrc"] = None
-                        st.session_state[f"{form_key}_vusd"] = None
-                        st.session_state[f"{form_key}_months"] = 3
-                        st.session_state[f"{form_key}_type"] = "-- Seleccione Tipo --"
-                        st.session_state[f"{form_key}_all_branches"] = False
-                        st.session_state[f"{form_key}_branches"] = []
-                        st.session_state[f"{form_key}_scopes"] = []
-                        st.session_state[f"{form_key}_restrictions"] = []
-                        st.session_state[f'{form_key}_count'] = None
-                        st.session_state['form_key_counter'] += 1
+                        # Clear form fields manually by resetting state
+                        keys_to_clear = [
+                            f"{form_key}_asoc", f"{form_key}_promo", f"{form_key}_vcrc", f"{form_key}_vusd",
+                            f"{form_key}_months", f"{form_key}_type", f"{form_key}_all_branches",
+                            f"{form_key}_branches", f"{form_key}_scopes", f"{form_key}_restrictions", f'{form_key}_count'
+                        ]
+                        default_values = {
+                            f"{form_key}_asoc": "", f"{form_key}_promo": "-- Seleccione Promoción --",
+                            f"{form_key}_vcrc": None, f"{form_key}_vusd": None,
+                            f"{form_key}_months": 3, f"{form_key}_type": "-- Seleccione Tipo --",
+                            f"{form_key}_all_branches": False, f"{form_key}_branches": [],
+                            f"{form_key}_scopes": [], f"{form_key}_restrictions": [], f'{form_key}_count': None
+                        }
+                        for key in keys_to_clear:
+                             # Check if key exists before trying to assign (handles potential race conditions)
+                             if key in st.session_state:
+                                 st.session_state[key] = default_values.get(key, None)
+
+                        st.session_state['form_key_counter'] += 1 # Increment form key counter
                         st.rerun() # Rerun to display receipt and use new form key
                     else:
                         st.error("🚨 Error al generar el lote. Campos NO borrados. Revise mensajes."); st.session_state['show_receipt'] = False
@@ -382,7 +375,7 @@ elif app_mode == "🛠️ Creador QR":
             if st.button("✨ Listo (Ocultar Recibo)"):
                 st.session_state['show_receipt'] = False; st.session_state['last_receipt_data'] = None
                 st.session_state['last_zip_buffer'] = None; st.session_state['last_zip_filename'] = None
-                st.session_state['form_key_counter'] += 1
+                st.session_state['form_key_counter'] += 1 # Increment key again helps ensure reset
                 st.rerun()
 
     # --- Gestión de Plantilla ---
