@@ -1,4 +1,4 @@
-# user_service.py (VERSIÓN CORREGIDA - Sin Token Admin en Llamadas a Funciones)
+# user_service.py (VERSIÓN CORREGIDA - Sin 'key' en Expander)
 import requests
 import streamlit as st
 import pandas as pd
@@ -42,56 +42,29 @@ def create_user_profile(email: str, username: str, password: str, role_id: int, 
     """
     Llama a la Edge Function 'create-user'. No necesita token de admin en el header.
     """
-    # Verificación de que el usuario actual es Admin (para seguridad en UI)
     if auth.get_user_role() != 'Admin':
         st.error("Acción no permitida para este rol.")
         return False
 
     function_url = f"{SUPABASE_URL}/functions/v1/create-user"
-
-    payload = {
-        "email": email,
-        "password": password,
-        "username": username,
-        "role_id": role_id,
-        "branch_id": branch_id,
-        "phone_number": phone_number if phone_number else None
-    }
-
-    # --- Header CORREGIDO: Solo API Key ---
-    headers = {
-        'apikey': SUPABASE_KEY, # La clave pública para acceder al gateway
-        'Content-Type': 'application/json'
-        # NO Authorization header needed here, function uses service key
-    }
-
+    payload = { "email": email, "password": password, "username": username, "role_id": role_id, "branch_id": branch_id, "phone_number": phone_number if phone_number else None }
+    headers = { 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' }
     try:
-        response = requests.post(function_url, headers=headers, json=payload)
-        response.raise_for_status() # Lanza error para 4xx/5xx
-
+        response = requests.post(function_url, headers=headers, json=payload); response.raise_for_status()
         response_data = response.json()
-        st.success(f"Usuario **{username}** ({email}) creado y confirmado. ID: {response_data.get('userId', 'N/A')}")
+        st.success(f"Usuario **{username}** ({email}) creado. ID: {response_data.get('userId', 'N/A')}")
         return True
-
     except requests.exceptions.HTTPError as err:
-        try:
-            error_data = err.response.json()
-            # Edge function devuelve 'error', API admin 'msg' o 'message'
-            error_msg = error_data.get('error', error_data.get('msg', error_data.get('message', str(err))))
-            st.error(f"Error al crear usuario ({err.response.status_code}): {error_msg}")
-        except Exception:
-            st.error(f"Error HTTP {err.response.status_code} al llamar a la función: {err.response.text}")
-        return False
-    except Exception as e:
-        st.error(f"Error inesperado llamando a la función 'create-user': {e}")
-        return False
+        try: error_data = err.response.json(); error_msg = error_data.get('error', str(err))
+        except: error_msg = err.response.text
+        st.error(f"Error al crear ({err.response.status_code}): {error_msg}"); return False
+    except Exception as e: st.error(f"Error llamando función 'create-user': {e}"); return False
 
-# --- Función de Actualización (Sigue usando API REST para perfiles) ---
+# --- Función de Actualización (API REST para perfiles) ---
 
 def update_user_profile(user_id: str, username: str, role_id: int, branch_id: int = None, phone_number: str = None):
     """Actualiza datos del perfil."""
     payload = {'username': username, 'role_id': role_id, 'branch_id': branch_id, 'phone_number': phone_number if phone_number else None}
-    # update_entry uses the logged-in user's token via get_headers(token)
     if db_service.update_entry('profiles', user_id, payload, id_column='id'):
         st.success(f"Perfil {username} actualizado."); return True
     return False
@@ -99,44 +72,22 @@ def update_user_profile(user_id: str, username: str, role_id: int, branch_id: in
 # --- Función de Eliminación (Llama a Edge Function 'delete-user') ---
 
 def delete_user_auth_and_profile(user_id: str):
-    """
-    Llama a la Edge Function 'delete-user'. No necesita token de admin en el header.
-    """
+    """Llama a la Edge Function 'delete-user'."""
     if auth.get_user_role() != 'Admin':
         st.error("Acción no permitida para este rol.")
         return False
-
     function_url = f"{SUPABASE_URL}/functions/v1/delete-user"
-
-    payload = { "user_id": user_id }
-
-    # --- Header CORREGIDO: Solo API Key ---
-    headers = {
-        'apikey': SUPABASE_KEY, # La clave pública para acceder al gateway
-        'Content-Type': 'application/json'
-        # NO Authorization header needed here
-    }
-
+    payload = { "user_id": user_id }; headers = { 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' }
     try:
-        response = requests.post(function_url, headers=headers, json=payload) # Usar POST según diseño de función
-        response.raise_for_status()
-
+        response = requests.post(function_url, headers=headers, json=payload); response.raise_for_status()
         response_data = response.json()
-        st.success(f"Proceso de eliminación para usuario ID {user_id} completado.")
-        st.info(f"{response_data.get('message', 'Sin mensaje adicional')}")
+        st.success(f"Eliminación usuario ID {user_id} completada."); st.info(f"{response_data.get('message', '')}")
         return True
-
     except requests.exceptions.HTTPError as err:
-        try:
-            error_data = err.response.json()
-            error_msg = error_data.get('error', str(err))
-            st.error(f"Error al eliminar usuario ({err.response.status_code}): {error_msg}")
-        except Exception:
-            st.error(f"Error HTTP {err.response.status_code} al llamar a la función: {err.response.text}")
-        return False
-    except Exception as e:
-        st.error(f"Error inesperado llamando a la función 'delete-user': {e}")
-        return False
+        try: error_data = err.response.json(); error_msg = error_data.get('error', str(err))
+        except: error_msg = err.response.text
+        st.error(f"Error al eliminar ({err.response.status_code}): {error_msg}"); return False
+    except Exception as e: st.error(f"Error llamando función 'delete-user': {e}"); return False
 
 
 # --- Renderización del Módulo de Streamlit ---
@@ -213,7 +164,8 @@ def render_user_management():
             for index, user_row in df_users.iterrows():
                 user_id = user_row['id']
                 expander_title = f"{user_row.get('username', 'Sin Nombre')} ({user_row.get('email', 'Sin Email')})"
-                with st.expander(expander_title, key=f"exp_user_{user_id}"):
+                # --- ¡CORRECCIÓN AQUÍ! --- Remove key= argument ---
+                with st.expander(expander_title):
                     edit_form_key = f"edit_user_form_{user_id}"
                     with st.form(edit_form_key):
                         st.caption(f"**ID:** `{user_id}`")
