@@ -1,21 +1,22 @@
-# user_service.py (VERSIÓN CORREGIDA - Manejo de None en Expander)
+# user_service.py (VERSIÓN CORREGIDA - Sin Token Admin en Llamadas a Funciones)
 import requests
 import streamlit as st
 import pandas as pd
 import uuid
 import db_service # Necesario para obtener listas de roles/sucursales
 import json
-# Importar la URL base de tu proyecto Supabase y el endpoint admin
-from db_config import SUPABASE_URL, ADMIN_AUTH_ENDPOINT, POSTGREST_ENDPOINT, get_headers
-import auth # Necesario para obtener el token del admin logueado y rol
+# Importar la URL base de tu proyecto Supabase y keys/headers
+from db_config import SUPABASE_URL, SUPABASE_KEY, POSTGREST_ENDPOINT, get_headers # No necesitamos ADMIN_AUTH_ENDPOINT aquí
+import auth # Necesario para obtener el rol del admin logueado
 
-# --- Funciones de Lectura ---
+# --- Funciones de Lectura (Sin cambios) ---
 
 def get_all_users_with_details():
     """Obtiene todos los usuarios con sus roles y sucursales asignadas usando PostgREST."""
-    token = st.session_state.get('token')
+    token = st.session_state.get('token') # Token needed for PostgREST access based on RLS
     url = f"{POSTGREST_ENDPOINT}/profiles?select=id,username,email,phone_number,role_id,branch_id,roles(role_name),branches(name)"
     try:
+        # Use get_headers which includes user token if available, needed for RLS on profiles
         response = requests.get(url, headers=get_headers(token))
         response.raise_for_status()
         data = response.json()
@@ -25,10 +26,9 @@ def get_all_users_with_details():
         # Handle potential missing nested data gracefully
         df['role_name'] = df['roles'].apply(lambda x: x.get('role_name') if isinstance(x, dict) else None)
         df['branch_name'] = df['branches'].apply(lambda x: x.get('name') if isinstance(x, dict) else 'N/A')
-        # Ensure essential columns exist, providing defaults if necessary
+        # Ensure essential columns exist
         for col in ['id', 'username', 'email', 'phone_number', 'role_id', 'branch_id']:
-            if col not in df.columns:
-                df[col] = None # Or appropriate default
+            if col not in df.columns: df[col] = None
         return df[['id', 'username', 'email', 'role_name', 'branch_name', 'phone_number', 'role_id', 'branch_id']]
 
     except Exception as e:
@@ -39,28 +39,59 @@ def get_all_users_with_details():
 # --- Función de Creación (Llama a Edge Function 'create-user') ---
 
 def create_user_profile(email: str, username: str, password: str, role_id: int, branch_id: int = None, phone_number: str = None):
-    """Llama a la Edge Function 'create-user'."""
-    admin_token = st.session_state.get('token')
-    if not admin_token: st.error("Se requiere autenticación de administrador."); return False
-    function_url = f"{SUPABASE_URL}/functions/v1/create-user"
-    payload = { "email": email, "password": password, "username": username, "role_id": role_id, "branch_id": branch_id, "phone_number": phone_number if phone_number else None }
-    headers = { 'Authorization': f'Bearer {admin_token}', 'Content-Type': 'application/json' }
-    try:
-        response = requests.post(function_url, headers=headers, json=payload); response.raise_for_status()
-        response_data = response.json()
-        st.success(f"Usuario **{username}** ({email}) creado. ID: {response_data.get('userId', 'N/A')}")
-        return True
-    except requests.exceptions.HTTPError as err:
-        try: error_data = err.response.json(); error_msg = error_data.get('error', str(err))
-        except: error_msg = err.response.text
-        st.error(f"Error al crear ({err.response.status_code}): {error_msg}"); return False
-    except Exception as e: st.error(f"Error llamando función 'create-user': {e}"); return False
+    """
+    Llama a la Edge Function 'create-user'. No necesita token de admin en el header.
+    """
+    # Verificación de que el usuario actual es Admin (para seguridad en UI)
+    if auth.get_user_role() != 'Admin':
+        st.error("Acción no permitida para este rol.")
+        return False
 
-# --- Función de Actualización (API REST para perfiles) ---
+    function_url = f"{SUPABASE_URL}/functions/v1/create-user"
+
+    payload = {
+        "email": email,
+        "password": password,
+        "username": username,
+        "role_id": role_id,
+        "branch_id": branch_id,
+        "phone_number": phone_number if phone_number else None
+    }
+
+    # --- Header CORREGIDO: Solo API Key ---
+    headers = {
+        'apikey': SUPABASE_KEY, # La clave pública para acceder al gateway
+        'Content-Type': 'application/json'
+        # NO Authorization header needed here, function uses service key
+    }
+
+    try:
+        response = requests.post(function_url, headers=headers, json=payload)
+        response.raise_for_status() # Lanza error para 4xx/5xx
+
+        response_data = response.json()
+        st.success(f"Usuario **{username}** ({email}) creado y confirmado. ID: {response_data.get('userId', 'N/A')}")
+        return True
+
+    except requests.exceptions.HTTPError as err:
+        try:
+            error_data = err.response.json()
+            # Edge function devuelve 'error', API admin 'msg' o 'message'
+            error_msg = error_data.get('error', error_data.get('msg', error_data.get('message', str(err))))
+            st.error(f"Error al crear usuario ({err.response.status_code}): {error_msg}")
+        except Exception:
+            st.error(f"Error HTTP {err.response.status_code} al llamar a la función: {err.response.text}")
+        return False
+    except Exception as e:
+        st.error(f"Error inesperado llamando a la función 'create-user': {e}")
+        return False
+
+# --- Función de Actualización (Sigue usando API REST para perfiles) ---
 
 def update_user_profile(user_id: str, username: str, role_id: int, branch_id: int = None, phone_number: str = None):
     """Actualiza datos del perfil."""
     payload = {'username': username, 'role_id': role_id, 'branch_id': branch_id, 'phone_number': phone_number if phone_number else None}
+    # update_entry uses the logged-in user's token via get_headers(token)
     if db_service.update_entry('profiles', user_id, payload, id_column='id'):
         st.success(f"Perfil {username} actualizado."); return True
     return False
@@ -68,21 +99,44 @@ def update_user_profile(user_id: str, username: str, role_id: int, branch_id: in
 # --- Función de Eliminación (Llama a Edge Function 'delete-user') ---
 
 def delete_user_auth_and_profile(user_id: str):
-    """Llama a la Edge Function 'delete-user'."""
-    admin_token = st.session_state.get('token')
-    if not admin_token: st.error("Se requiere autenticación de administrador."); return False
+    """
+    Llama a la Edge Function 'delete-user'. No necesita token de admin en el header.
+    """
+    if auth.get_user_role() != 'Admin':
+        st.error("Acción no permitida para este rol.")
+        return False
+
     function_url = f"{SUPABASE_URL}/functions/v1/delete-user"
-    payload = { "user_id": user_id }; headers = { 'Authorization': f'Bearer {admin_token}', 'Content-Type': 'application/json' }
+
+    payload = { "user_id": user_id }
+
+    # --- Header CORREGIDO: Solo API Key ---
+    headers = {
+        'apikey': SUPABASE_KEY, # La clave pública para acceder al gateway
+        'Content-Type': 'application/json'
+        # NO Authorization header needed here
+    }
+
     try:
-        response = requests.post(function_url, headers=headers, json=payload); response.raise_for_status()
+        response = requests.post(function_url, headers=headers, json=payload) # Usar POST según diseño de función
+        response.raise_for_status()
+
         response_data = response.json()
-        st.success(f"Eliminación usuario ID {user_id} completada."); st.info(f"{response_data.get('message', '')}")
+        st.success(f"Proceso de eliminación para usuario ID {user_id} completado.")
+        st.info(f"{response_data.get('message', 'Sin mensaje adicional')}")
         return True
+
     except requests.exceptions.HTTPError as err:
-        try: error_data = err.response.json(); error_msg = error_data.get('error', str(err))
-        except: error_msg = err.response.text
-        st.error(f"Error al eliminar ({err.response.status_code}): {error_msg}"); return False
-    except Exception as e: st.error(f"Error llamando función 'delete-user': {e}"); return False
+        try:
+            error_data = err.response.json()
+            error_msg = error_data.get('error', str(err))
+            st.error(f"Error al eliminar usuario ({err.response.status_code}): {error_msg}")
+        except Exception:
+            st.error(f"Error HTTP {err.response.status_code} al llamar a la función: {err.response.text}")
+        return False
+    except Exception as e:
+        st.error(f"Error inesperado llamando a la función 'delete-user': {e}")
+        return False
 
 
 # --- Renderización del Módulo de Streamlit ---
@@ -119,12 +173,12 @@ def render_user_management():
                 input_phone = st.text_input("Teléfono (Opcional)")
             with col2:
                 if not role_options: st.error("Error: No se cargaron roles."); role_names_list_create = []
-                else: role_names_list_create = sorted(list(role_options.keys())) # Sort for consistency
+                else: role_names_list_create = sorted(list(role_options.keys()))
                 selected_role_name = st.selectbox("Rol", options=role_names_list_create)
                 selected_branch_name = None
                 if selected_role_name in ["Creator", "Cashier"]:
                     if not branch_options: st.warning("No hay sucursales creadas.")
-                    else: selected_branch_name = st.selectbox("Sucursal Asignada", options=sorted(list(branch_options.keys()))) # Sort
+                    else: selected_branch_name = st.selectbox("Sucursal Asignada", options=sorted(list(branch_options.keys())))
 
             submitted_create = st.form_submit_button("Crear Usuario", type="primary")
 
@@ -149,7 +203,6 @@ def render_user_management():
         df_users = get_all_users_with_details()
 
         if not df_users.empty:
-            # Display basic list first
             st.dataframe(
                 df_users[['username', 'email', 'role_name', 'branch_name', 'phone_number']].rename(columns={'username': 'Nombre', 'email': 'Correo', 'role_name':'Rol', 'branch_name':'Sucursal', 'phone_number':'Teléfono'}),
                 use_container_width=True, hide_index=True
@@ -157,27 +210,23 @@ def render_user_management():
             st.divider()
             st.markdown("#### Editar / Eliminar Usuario")
 
-            # Create an expander for each user
             for index, user_row in df_users.iterrows():
                 user_id = user_row['id']
-                # --- ¡CORRECCIÓN AQUÍ! --- Use .get() for safety ---
                 expander_title = f"{user_row.get('username', 'Sin Nombre')} ({user_row.get('email', 'Sin Email')})"
                 with st.expander(expander_title, key=f"exp_user_{user_id}"):
                     edit_form_key = f"edit_user_form_{user_id}"
                     with st.form(edit_form_key):
                         st.caption(f"**ID:** `{user_id}`")
-                        # Use .get() for default values in inputs too
                         edit_username = st.text_input("Nombre Completo", value=user_row.get('username', ''), key=f"uname_{user_id}")
                         edit_phone = st.text_input("Teléfono", value=user_row.get('phone_number') or "", key=f"phone_{user_id}")
 
                         # Role Selection
-                        current_role_index = 0; role_names_list_edit = sorted(list(role_options.keys())) # Sort
+                        current_role_index = 0; role_names_list_edit = sorted(list(role_options.keys()))
                         if user_row.get('role_name') in role_names_list_edit: current_role_index = role_names_list_edit.index(user_row['role_name'])
                         edit_role_name = st.selectbox("Rol", options=role_names_list_edit, index=current_role_index, key=f"role_{user_id}")
 
                         # Branch Selection
                         edit_branch_name = None; current_branch_id = user_row.get('branch_id'); branch_names_list_edit = list(branch_options_with_none.keys()); current_branch_index = 0
-                        # Find index based on value (ID), not key (name)
                         for i, name in enumerate(branch_names_list_edit):
                             if branch_options_with_none[name] == current_branch_id: current_branch_index = i; break
                         if edit_role_name in ["Creator", "Cashier"]:
@@ -193,7 +242,6 @@ def render_user_management():
                         if submitted_edit:
                             edit_role_id = role_options.get(edit_role_name)
                             phone_to_save = edit_phone if edit_phone else None
-                            # Validation before update
                             if not edit_username: st.error("Nombre vacío.")
                             elif not edit_role_id: st.error("Rol inválido.")
                             elif edit_role_name in ["Creator", "Cashier"] and edit_branch_id is None and branch_options: st.error("Rol requiere sucursal.")
@@ -201,7 +249,7 @@ def render_user_management():
                                 if update_user_profile(user_id, edit_username, edit_role_id, edit_branch_id, phone_to_save): st.rerun()
 
                         if submitted_delete:
-                            st.warning("¡Esta acción eliminará la cuenta de Autenticación y el Perfil!")
+                            st.warning("¡Eliminará la cuenta de Autenticación y el Perfil!")
                             confirm_delete_key = f"confirm_del_user_{user_id}"
                             if confirm_delete_key not in st.session_state: st.session_state[confirm_delete_key] = False
                             st.session_state[confirm_delete_key] = st.checkbox("Confirmar eliminación COMPLETA", key=f"cb_{confirm_delete_key}", value=st.session_state[confirm_delete_key])
