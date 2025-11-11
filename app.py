@@ -19,8 +19,14 @@ LOGO_URL = "https://placehold.co/300x100/1E3260/FFFFFF/png?text=Novillo+Alegre+Q
 TEMPLATE_DIR = 'design_templates'; os.makedirs(TEMPLATE_DIR, exist_ok=True)
 GENERATED_QRS_DIR = 'generated_qrs'; os.makedirs(GENERATED_QRS_DIR, exist_ok=True)
 TEMPLATE_PATH_KEY = 'current_template_path'
-CARD_WIDTH_PX = 1063; CARD_HEIGHT_PX = 591
-CARD_WIDTH_MM = 90; CARD_HEIGHT_MM = 50
+
+# --- CAMBIOS DE DIMENSIÓN (8.5cm x 5cm) ---
+CARD_WIDTH_PX = 1004 # Ajustado de 1063 (8.5cm a 300dpi)
+CARD_HEIGHT_PX = 591 # (5cm a 300dpi)
+CARD_WIDTH_MM = 85   # Ajustado de 90
+CARD_HEIGHT_MM = 50
+# --- FIN CAMBIOS ---
+
 QR_SIZE_PX = 250; BORDER_PX = 50
 
 # --- Inicialización de Estado ---
@@ -46,7 +52,7 @@ if 'clear_form_inputs' not in st.session_state: st.session_state['clear_form_inp
 
 # --- FUNCIONES AUXILIARES ---
 def create_qr_card(data_to_encode: str, output_path: str, description: str, expiration: str, consecutive: str):
-    """Genera JPG de tarjeta 9x5cm con QR, usando plantilla PNG si existe."""
+    """Genera JPG de tarjeta 8.5x5cm con QR, usando plantilla PNG si existe."""
     template_path = st.session_state.get(TEMPLATE_PATH_KEY)
     card_img = None
     try:
@@ -72,26 +78,56 @@ def create_qr_card(data_to_encode: str, output_path: str, description: str, expi
 
     # Cargar fuentes principales
     try:
-        main_font = ImageFont.truetype("arial.ttf", size=30)
-        consecutive_font = ImageFont.truetype("arialbd.ttf", size=40)
+        # --- CAMBIO DE TAMAÑO DE FUENTES ---
+        main_font = ImageFont.truetype("arial.ttf", size=36) # Ajustado de 30
+        consecutive_font = ImageFont.truetype("arialbd.ttf", size=48) # Ajustado de 40
     except IOError:
         main_font = consecutive_font = ImageFont.load_default()
 
     # Generar QR
     qr = qrcode.QRCode(1, qrcode.constants.ERROR_CORRECT_M, 8, 2); qr.add_data(data_to_encode); qr.make(fit=True); qr_img = qr.make_image(fill_color="black", back_color="white").convert('RGB')
     QR_X = CARD_WIDTH_PX - QR_SIZE_PX - BORDER_PX; QR_Y = 100
-    if has_template: PROMO_POS = (BORDER_PX, 400); EXP_POS = (BORDER_PX, 440); CONS_POS = (BORDER_PX, 480)
-    else: PROMO_POS = (BORDER_PX, 150); EXP_POS = (BORDER_PX, 250); CONS_POS = (BORDER_PX, 480)
-    draw.text(PROMO_POS, description, fill=(0,0,0), font=main_font); draw.text(EXP_POS, f"Válido hasta: {expiration}", fill=(100,100,100), font=main_font); draw.text(CONS_POS, f"CONSECUTIVO: {consecutive}", fill=(0,0,0), font=consecutive_font)
+    
+    # --- LÓGICA DE POSICIONES (Centrado) ---
+    desc_text = description
+    exp_text = f"Válido hasta: {expiration}"
+    cons_text = f"CONSECUTIVO: {consecutive}"
+    
+    # Calcular anchos
+    try:
+        desc_width = draw.textlength(desc_text, font=main_font)
+        cons_width = draw.textlength(cons_text, font=consecutive_font)
+    except AttributeError: # Fallback para versiones antiguas de Pillow
+        desc_width = main_font.getsize(desc_text)[0]
+        cons_width = consecutive_font.getsize(cons_text)[0]
+
+    # Calcular X centrado
+    DESC_X_CENTERED = (CARD_WIDTH_PX - desc_width) / 2
+    CONS_X_CENTERED = (CARD_WIDTH_PX - cons_width) / 2
+
+    if has_template: 
+        PROMO_POS = (DESC_X_CENTERED, 400) # Centrado
+        EXP_POS = (BORDER_PX, 440)         # Izquierda (Sin cambios)
+        CONS_POS = (CONS_X_CENTERED, 480)  # Centrado
+    else: 
+        PROMO_POS = (DESC_X_CENTERED, 150) # Centrado
+        EXP_POS = (BORDER_PX, 250)         # Izquierda (Sin cambios)
+        CONS_POS = (CONS_X_CENTERED, 480)  # Centrado
+    
+    draw.text(PROMO_POS, desc_text, fill=(0,0,0), font=main_font)
+    draw.text(EXP_POS, exp_text, fill=(100,100,100), font=main_font)
+    draw.text(CONS_POS, cons_text, fill=(0,0,0), font=consecutive_font)
+    # --- FIN LÓGICA DE POSICIONES ---
+
     qr_scaled = qr_img.resize((QR_SIZE_PX, QR_SIZE_PX)); card_img.paste(qr_scaled, (QR_X, QR_Y))
     card_img.save(output_path, "JPEG", quality=95); return output_path
 
 def generate_design_template(output_filename):
-    """Genera guía JPG 9x5cm."""
+    """Genera guía JPG 8.5x5cm."""
     img = Image.new('RGB', (CARD_WIDTH_PX, CARD_HEIGHT_PX), (230, 230, 230)); draw = ImageDraw.Draw(img)
     try: title_font = ImageFont.truetype("arialbd.ttf", size=40); main_font = ImageFont.truetype("arial.ttf", size=24)
     except IOError: title_font = main_font = ImageFont.load_default()
-    draw.text((BORDER_PX, BORDER_PX), "GUÍA HORIZONTAL (1063x591 px)", fill=(0,0,0), font=title_font)
+    draw.text((BORDER_PX, BORDER_PX), f"GUÍA HORIZONTAL ({CARD_WIDTH_PX}x{CARD_HEIGHT_PX} px)", fill=(0,0,0), font=title_font)
     QR_X = CARD_WIDTH_PX - QR_SIZE_PX - BORDER_PX; QR_Y = 100; draw.rectangle([QR_X, QR_Y, QR_X + QR_SIZE_PX, QR_Y + QR_SIZE_PX], outline=(255,0,0), width=3); draw.text((QR_X + 10, QR_Y + 10), "ESPACIO QR (250x250)", fill=(255,0,0), font=main_font)
     TXT_X = BORDER_PX; TXT_Y = 400; draw.rectangle([TXT_X, TXT_Y, CARD_WIDTH_PX - BORDER_PX, CARD_HEIGHT_PX - BORDER_PX], outline=(0,0,255), width=3); draw.text((TXT_X + 10, TXT_Y + 10), "ESPACIO TEXTOS", fill=(0,0,255), font=main_font); draw.text((TXT_X + 10, TXT_Y + 40), "(Desc, Validez, Consec.)", fill=(0,0,255), font=main_font)
     img.save(output_filename, "JPEG", quality=95)
@@ -403,18 +439,23 @@ elif app_mode == "🛠️ Creador QR":
 
     # --- Gestión de Plantilla ---
     with tab_template:
-        st.header("Gestión de Plantilla"); st.subheader("1. Guía (JPG)"); st.markdown("Guía horizontal (9x5 cm).")
+        st.header("Gestión de Plantilla"); st.subheader(f"1. Guía (JPG {CARD_WIDTH_MM}x{CARD_HEIGHT_MM}mm)"); st.markdown(f"Guía horizontal ({CARD_WIDTH_PX}x{CARD_HEIGHT_PX} px).")
         BLANK_JPG = os.path.join(TEMPLATE_DIR, "plantilla_guia.jpg")
         if st.button("Generar/Descargar Guía JPG", key="dl_guide"):
             generate_design_template(BLANK_JPG);
             with open(BLANK_JPG, "rb") as f: st.download_button("Descargar Guía (JPG)", f, os.path.basename(BLANK_JPG), "image/jpeg", key="dl_guide_btn")
-        st.markdown("---"); st.subheader("2. Subir Plantilla (PNG)")
-        up_file = st.file_uploader("Suba PNG (1063x591px, Horizontal)", type="png", key="up_tmpl")
+        st.markdown("---"); st.subheader(f"2. Subir Plantilla (PNG {CARD_WIDTH_PX}x{CARD_HEIGHT_PX}px)")
+        up_file = st.file_uploader(f"Suba PNG ({CARD_WIDTH_PX}x{CARD_HEIGHT_PX}px, Horizontal)", type="png", key="up_tmpl")
         if up_file:
             save_path = os.path.join(TEMPLATE_DIR, "plantilla_arte_activa.png")
             try:
-                with open(save_path, "wb") as f: f.write(up_file.getbuffer())
-                st.session_state[TEMPLATE_PATH_KEY] = save_path; st.success(f"Plantilla cargada: {up_file.name}")
+                # Validar dimensiones al subir
+                img = Image.open(up_file)
+                if img.size != (CARD_WIDTH_PX, CARD_HEIGHT_PX):
+                    st.error(f"Error: La imagen debe ser de {CARD_WIDTH_PX}x{CARD_HEIGHT_PX} píxeles. La imagen subida es de {img.size[0]}x{img.size[1]} píxeles.")
+                else:
+                    with open(save_path, "wb") as f: f.write(up_file.getbuffer())
+                    st.session_state[TEMPLATE_PATH_KEY] = save_path; st.success(f"Plantilla cargada: {up_file.name}")
             except Exception as e: st.error(f"Error al guardar: {e}")
         current_template = st.session_state.get(TEMPLATE_PATH_KEY)
         if current_template and os.path.exists(current_template): st.info(f"🎨 Plantilla Actual: {os.path.basename(current_template)}")
