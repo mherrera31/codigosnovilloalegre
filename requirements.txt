@@ -7,4 +7,4 @@ opencv-python-headless
 fpdf2
 requests  # Usaremos requests para llamadas directas a la API REST de Supabase
 pdf2image
-supabase-py
+supabase
