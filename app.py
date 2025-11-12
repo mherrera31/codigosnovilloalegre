@@ -1,8 +1,8 @@
-# app.py (VERSIÓN CORREGIDA - Usa fuente local DejaVuSans para tildes/ñ)
+# app.py (VERSIÓN CORREGIDA - Administrador de Plantillas y Vista Previa)
 import streamlit as st
 import auth
 import db_service
-import user_service # Import user_service here
+import user_service 
 import requests
 import qrcode
 from PIL import Image, ImageDraw, ImageFont
@@ -12,18 +12,18 @@ from datetime import datetime, timedelta
 import pandas as pd
 import zipfile
 import io
-import textwrap # <-- IMPORTANTE: Añadir esta librería
+import textwrap 
 
 # --- CONFIGURACIÓN Y CONSTANTES ---
 st.set_page_config(page_title="Sistema QR Novillo Alegre", layout="wide")
 LOGO_URL = "https://placehold.co/300x100/1E3260/FFFFFF/png?text=Novillo+Alegre+QR"
 TEMPLATE_DIR = 'design_templates'; os.makedirs(TEMPLATE_DIR, exist_ok=True)
 GENERATED_QRS_DIR = 'generated_qrs'; os.makedirs(GENERATED_QRS_DIR, exist_ok=True)
-TEMPLATE_PATH_KEY = 'current_template_path'
+# Se elimina TEMPLATE_PATH_KEY, ya no se usa
 
 # --- TAMAÑO 8.5cm x 5cm ---
-CARD_WIDTH_PX = 1004 # 8.5cm a ~300dpi
-CARD_HEIGHT_PX = 591 # 5cm a ~300dpi
+CARD_WIDTH_PX = 1004 
+CARD_HEIGHT_PX = 591
 CARD_WIDTH_MM = 85
 CARD_HEIGHT_MM = 50
 # --- FIN TAMAÑO ---
@@ -31,13 +31,12 @@ CARD_HEIGHT_MM = 50
 QR_SIZE_PX = 250; BORDER_PX = 50
 
 # --- Inicialización de Estado ---
-# (El estado de la sesión no cambia)
 if 'logged_in' not in st.session_state: st.session_state['logged_in'] = False
 if 'user_role' not in st.session_state: st.session_state['user_role'] = None
-if 'username' not in st.session_state: st.session_state['username'] = 'N/A' # Default username
+if 'username' not in st.session_state: st.session_state['username'] = 'N/A' 
 if 'user_id' not in st.session_state: st.session_state['user_id'] = None
 if 'branch_id' not in st.session_state: st.session_state['branch_id'] = None
-if TEMPLATE_PATH_KEY not in st.session_state: st.session_state[TEMPLATE_PATH_KEY] = None
+# Se elimina la inicialización de TEMPLATE_PATH_KEY
 if 'last_receipt_data' not in st.session_state: st.session_state['last_receipt_data'] = None
 if 'show_receipt' not in st.session_state: st.session_state['show_receipt'] = False
 if 'last_zip_buffer' not in st.session_state: st.session_state['last_zip_buffer'] = None
@@ -46,15 +45,31 @@ if 'selected_receipt_id' not in st.session_state: st.session_state['selected_rec
 if 'form_key_counter' not in st.session_state: st.session_state['form_key_counter'] = 0
 if 'clear_form_inputs' not in st.session_state: st.session_state['clear_form_inputs'] = False
 
+# --- NUEVA FUNCIÓN: Obtener lista de plantillas ---
+@st.cache_data(ttl=60) # Cache por 60 segundos
+def get_template_list():
+    if not os.path.exists(TEMPLATE_DIR):
+        return []
+    try:
+        # Devuelve solo los nombres de archivo .png, sin la extensión
+        return sorted([
+            f.replace('.png', '') 
+            for f in os.listdir(TEMPLATE_DIR) 
+            if f.endswith('.png') and f != "plantilla_guia.jpg"
+        ])
+    except Exception as e:
+        st.error(f"Error al leer directorio de plantillas: {e}")
+        return []
 
 # --- FUNCIONES AUXILIARES ---
-# --- INICIO CAMBIO: La función ahora recibe las listas de texto ---
+# --- INICIO CAMBIO: La función ahora recibe template_path ---
 def create_qr_card(
     data_to_encode: str, 
+    template_path: str, # <-- CAMBIO: Se pasa la ruta de la plantilla
     output_path: str, 
-    scopes_text_list: list, # <-- CAMBIO: Lista de Validez
-    restrictions_text_list: list, # <-- CAMBIO: Lista de Restricciones
-    branch_names: list, # Lista de nombres de sucursales
+    scopes_text_list: list, 
+    restrictions_text_list: list, 
+    branch_names: list, 
     expiration: str, 
     consecutive: str
 ):
@@ -62,9 +77,9 @@ def create_qr_card(
     """
     Genera JPG de tarjeta 8.5x5cm con QR.
     """
-    template_path = st.session_state.get(TEMPLATE_PATH_KEY)
     card_img = None
     try:
+        # --- CAMBIO: Usar el template_path_argumento, no el session_state ---
         if template_path and os.path.exists(template_path):
             card_img = Image.open(template_path).convert('RGB')
             if card_img.size != (CARD_WIDTH_PX, CARD_HEIGHT_PX):
@@ -78,113 +93,101 @@ def create_qr_card(
 
     draw = ImageDraw.Draw(card_img)
     
-    # --- INICIO CAMBIO: Cargar 4 fuentes locales (DejaVuSans) con encoding="utf-8" ---
+    # Cargar 4 fuentes locales (DejaVuSans) con encoding="utf-8"
     try:
-        # Asegúrate de haber subido 'DejaVuSans.ttf' y 'DejaVuSans-Bold.ttf'
-        desc_font = ImageFont.truetype("DejaVuSans.ttf", size=12, encoding="utf-8") # Validez/Restricciones
-        exp_font = ImageFont.truetype("DejaVuSans.ttf", size=12, encoding="utf-8")  # Fecha
-        consecutive_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=25, encoding="utf-8") # Consecutivo (Negrita, 65)
-        sucursal_font = ImageFont.truetype("DejaVuSans.ttf", size=15, encoding="utf-8") # Sucursales
+        desc_font = ImageFont.truetype("DejaVuSans.ttf", size=36, encoding="utf-8") 
+        exp_font = ImageFont.truetype("DejaVuSans.ttf", size=30, encoding="utf-8")  
+        consecutive_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=65, encoding="utf-8") 
+        sucursal_font = ImageFont.truetype("DejaVuSans.ttf", size=28, encoding="utf-8") 
     except IOError:
         st.error("Error: No se encontraron los archivos de fuente (DejaVuSans.ttf o DejaVuSans-Bold.ttf). Asegúrate de que estén en la misma carpeta que app.py.")
         desc_font = exp_font = consecutive_font = sucursal_font = ImageFont.load_default()
-    # --- FIN CAMBIO ---
 
     # Generar QR
     qr = qrcode.QRCode(1, qrcode.constants.ERROR_CORRECT_M, 8, 2); qr.add_data(data_to_encode); qr.make(fit=True); qr_img = qr.make_image(fill_color="black", back_color="white").convert('RGB')
     
-    # --- INICIO CAMBIO: Lógica de Posiciones y Text Wrap ---
+    # Lógica de Posiciones y Text Wrap
     
     # 1. Textos
     exp_text = f"Válido hasta: {expiration}"
-    cons_text = f"{consecutive}" # Sin la palabra "CONSECUTIVO:"
+    cons_text = f"{consecutive}" 
 
     # Texto de Sucursales
-    if not branch_names: # Si la lista está vacía (significa "Todas")
+    if not branch_names: 
         sucursales_text = "Válido en todas las sucursales"
     else:
         sucursales_text = "Sucursales: " + ", ".join(branch_names)
 
-    # 2. Posición QR (Global, derecha, movido un poco hacia arriba)
+    # 2. Posición QR
     QR_X = CARD_WIDTH_PX - QR_SIZE_PX - BORDER_PX
     QR_Y = BORDER_PX + 50 
     QR_POS = (int(QR_X), int(QR_Y))
 
-    # 3. Calcular anchos (MÉTODO MODERNO: .getlength())
+    # 3. Calcular anchos
     exp_width = exp_font.getlength(exp_text)
     cons_width = consecutive_font.getlength(cons_text)
     sucursales_width = sucursal_font.getlength(sucursales_text)
 
-    # 4. Posición Consecutivo (Centrado debajo del QR)
+    # 4. Posición Consecutivo
     CONS_X_CENTERED_ON_QR = (QR_X + (QR_SIZE_PX / 2)) - (cons_width / 2)
-    CONS_Y = QR_Y + QR_SIZE_PX + 20 # 20px padding bajo el QR
+    CONS_Y = QR_Y + QR_SIZE_PX + 20 
     CONS_POS = (int(CONS_X_CENTERED_ON_QR), int(CONS_Y))
 
-    # 5. Posición Sucursales (Centrado debajo del Consecutivo)
+    # 5. Posición Sucursales
     cons_bbox = consecutive_font.getbbox(cons_text)
     cons_height = cons_bbox[3] - cons_bbox[1]
     SUC_X_CENTERED_ON_QR = (QR_X + (QR_SIZE_PX / 2)) - (sucursales_width / 2)
-    SUC_Y = CONS_Y + cons_height + 15 # Y del consecutivo + alto + padding
+    SUC_Y = CONS_Y + cons_height + 15 
     SUC_POS = (int(SUC_X_CENTERED_ON_QR), int(SUC_Y))
 
-    # 6. Posición Fecha (Inferior Central, última línea)
+    # 6. Posición Fecha
     exp_bbox = exp_font.getbbox(exp_text)
     exp_height = exp_bbox[3] - exp_bbox[1]
     EXP_X_CENTERED_ON_CARD = (CARD_WIDTH_PX / 2) - (exp_width / 2)
     EXP_Y_BOTTOM = CARD_HEIGHT_PX - BORDER_PX - exp_height
     EXP_POS = (int(EXP_X_CENTERED_ON_CARD), int(EXP_Y_BOTTOM))
 
-    # 7. Lógica de Text Wrap para Validez/Restricciones (¡AQUÍ ESTÁ EL CAMBIO!)
+    # 7. Lógica de Text Wrap para Validez/Restricciones
+    WRAP_CHARS = 55 
+    GAP_BETWEEN_BLOCKS = 20 
     
-    WRAP_CHARS = 55 # Párrafo más ancho (era 45)
-    GAP_BETWEEN_BLOCKS = 20 # Espacio fijo entre bloques (era una línea entera)
-    
-    # Preparar bloques de texto
     validez_text = "Validez: " + ". ".join(scopes_text_list) if scopes_text_list else ""
     restric_text = "Restricciones: " + ". ".join(restrictions_text_list) if restrictions_text_list else ""
 
     wrapped_validez = textwrap.wrap(validez_text, width=WRAP_CHARS)
     wrapped_restric = textwrap.wrap(restric_text, width=WRAP_CHARS)
     
-    # Calcular alto de línea
     desc_bbox = desc_font.getbbox("A")
-    line_height = (desc_bbox[3] - desc_bbox[1]) + 5 # Alto (bottom-top) + 5px padding
+    line_height = (desc_bbox[3] - desc_bbox[1]) + 5 
     
-    # Calcular alto total del bloque de texto
     total_text_height = 0
     if wrapped_validez:
         total_text_height += (len(wrapped_validez) * line_height)
     if wrapped_restric:
         total_text_height += (len(wrapped_restric) * line_height)
     if wrapped_validez and wrapped_restric:
-        total_text_height += GAP_BETWEEN_BLOCKS # Añadir el espacio entre bloques
+        total_text_height += GAP_BETWEEN_BLOCKS 
     
-    # Calcular Y inicial (posicionarlo arriba de la fecha)
-    current_y = EXP_Y_BOTTOM - 15 - total_text_height # 15px padding arriba de la fecha
+    current_y = EXP_Y_BOTTOM - 15 - total_text_height 
 
-    # Dibujar bloque de VALIDEZ
     for line in wrapped_validez:
         line_width = desc_font.getlength(line)
         LINE_X_CENTERED = (CARD_WIDTH_PX / 2) - (line_width / 2)
         draw.text((int(LINE_X_CENTERED), int(current_y)), line, fill=(0,0,0), font=desc_font)
         current_y += line_height
     
-    # Añadir el espacio si ambos bloques existen
     if wrapped_validez and wrapped_restric:
         current_y += GAP_BETWEEN_BLOCKS
 
-    # Dibujar bloque de RESTRICIONES
     for line in wrapped_restric:
         line_width = desc_font.getlength(line)
         LINE_X_CENTERED = (CARD_WIDTH_PX / 2) - (line_width / 2)
         draw.text((int(LINE_X_CENTERED), int(current_y)), line, fill=(0,0,0), font=desc_font)
         current_y += line_height
     
-    # --- FIN LÓGICA DE POSICIONES ---
-
     # Dibujar Textos (Consecutivo, Sucursales y Fecha)
     draw.text(CONS_POS, cons_text, fill=(0,0,0), font=consecutive_font)
-    draw.text(SUC_POS, sucursales_text, fill=(80,80,80), font=sucursal_font) # Color gris
+    draw.text(SUC_POS, sucursales_text, fill=(80,80,80), font=sucursal_font) 
     draw.text(EXP_POS, exp_text, fill=(100,100,100), font=exp_font)
     
     # Pegar QR
@@ -196,14 +199,11 @@ def create_qr_card(
 def generate_design_template(output_filename):
     """Genera guía JPG 8.5x5cm."""
     img = Image.new('RGB', (CARD_WIDTH_PX, CARD_HEIGHT_PX), (230, 230, 230)); draw = ImageDraw.Draw(img)
-    # --- INICIO CAMBIO: Añadir encoding="utf-8" ---
     try:
-        # Asegúrate de haber subido 'DejaVuSans.ttf' y 'DejaVuSans-Bold.ttf'
         title_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=40, encoding="utf-8")
         main_font = ImageFont.truetype("DejaVuSans.ttf", size=24, encoding="utf-8")
     except IOError:
         title_font = main_font = ImageFont.load_default()
-    # --- FIN CAMBIO ---
     draw.text((BORDER_PX, BORDER_PX), f"GUÍA HORIZONTAL ({CARD_WIDTH_PX}x{CARD_HEIGHT_PX} px)", fill=(0,0,0), font=title_font)
     QR_X = CARD_WIDTH_PX - QR_SIZE_PX - BORDER_PX; QR_Y = 100; draw.rectangle([QR_X, QR_Y, QR_X + QR_SIZE_PX, QR_Y + QR_SIZE_PX], outline=(255,0,0), width=3); draw.text((QR_X + 10, QR_Y + 10), "ESPACIO QR (250x250)", fill=(255,0,0), font=main_font)
     TXT_X = BORDER_PX; TXT_Y = 400; draw.rectangle([TXT_X, TXT_Y, CARD_WIDTH_PX - BORDER_PX, CARD_HEIGHT_PX - BORDER_PX], outline=(0,0,255), width=3); draw.text((TXT_X + 10, TXT_Y + 10), "ESPACIO TEXTOS", fill=(0,0,255), font=main_font); draw.text((TXT_X + 10, TXT_Y + 40), "(Desc, Validez, Consec.)", fill=(0,0,255), font=main_font)
@@ -306,15 +306,31 @@ elif app_mode == "🛠️ Creador QR":
             type_list = ["-- Seleccione Tipo --"] + sorted(list(type_options.keys()))
             scope_list = sorted(list(scope_options.keys()))
             restriction_list = sorted(list(restriction_options.keys()))
-
-            # Removed hidden text input
+            
+            # --- INICIO CAMBIO: Selector de Plantilla ---
+            template_list = ["Fondo Blanco"] + get_template_list()
+            # Usar st.session_state.get para mantener la selección si el formulario falla
+            default_template_index = 0
+            current_template_sel = st.session_state.get(f"{form_key}_template")
+            if not st.session_state.get('clear_form_inputs') and current_template_sel in template_list:
+                default_template_index = template_list.index(current_template_sel)
+            
+            selected_template_name = st.selectbox(
+                "1. Seleccione Plantilla", 
+                options=template_list, 
+                index=default_template_index,
+                key=f"{form_key}_template"
+            )
+            st.markdown("---")
+            # --- FIN CAMBIO ---
 
             # Inputs
             default_asoc = "" if st.session_state.get('clear_form_inputs') else st.session_state.get(f"{form_key}_asoc", "")
-            input_asociado = st.text_input("**Asociado o Comprador (*Obligatorio*)**", value=default_asoc, key=f"{form_key}_asoc")
+            input_asociado = st.text_input("**2. Asociado o Comprador (*Obligatorio*)**", value=default_asoc, key=f"{form_key}_asoc")
 
             col1, col2 = st.columns(2)
             with col1:
+                st.markdown("#### 3. Detalles de Promoción y Valor")
                 promo_index = 0
                 current_promo_sel = st.session_state.get(f"{form_key}_promo")
                 if not st.session_state.get('clear_form_inputs') and current_promo_sel in promo_list: promo_index = promo_list.index(current_promo_sel)
@@ -327,6 +343,7 @@ elif app_mode == "🛠️ Creador QR":
                 value_usd = st.number_input("Valor Base USD (*Obligatorio*)", min_value=0.0, format="%.2f", value=default_vusd, placeholder="0.00", key=f"{form_key}_vusd")
 
             with col2:
+                st.markdown("#### 4. Reglas y Límite")
                 months_index = 0; default_months = 3 if st.session_state.get('clear_form_inputs') else st.session_state.get(f"{form_key}_months", 3)
                 if default_months in [3, 6, 9, 12]: months_index = [3, 6, 9, 12].index(default_months)
                 valid_months = st.selectbox("Meses Vigencia (*Obligatorio*)", options=[3, 6, 9, 12], index=months_index, key=f"{form_key}_months")
@@ -338,20 +355,19 @@ elif app_mode == "🛠️ Creador QR":
                 default_all_branches = False if st.session_state.get('clear_form_inputs') else st.session_state.get(f"{form_key}_all_branches", False)
                 all_branches_selected = st.checkbox("Permitir en Todas las Sucursales", value=default_all_branches, key=f"{form_key}_all_branches")
 
-                # --- CORRECTED DEFAULTS FOR MULTISELECT ---
                 default_branches_raw = [] if st.session_state.get('clear_form_inputs') else st.session_state.get(f"{form_key}_branches", [])
-                default_branches = [b for b in default_branches_raw if b in branch_options] # Filter invalid options
+                default_branches = [b for b in default_branches_raw if b in branch_options] 
                 allowed_branches = st.multiselect(
-                    "Sucursales Permitidas (Aparecerá en la tarjeta)", # Texto cambiado
+                    "Sucursales Permitidas (Aparecerá en la tarjeta)", 
                     options=branch_options, default=default_branches, key=f"{form_key}_branches", disabled=all_branches_selected
                  )
 
                 default_scopes_raw = [] if st.session_state.get('clear_form_inputs') else st.session_state.get(f"{form_key}_scopes", [])
-                default_scopes = [s for s in default_scopes_raw if s in scope_list] # Filter invalid options
+                default_scopes = [s for s in default_scopes_raw if s in scope_list] 
                 selected_scope_names = st.multiselect("Validez Cupón (Aparecerá en la tarjeta)", options=scope_list, default=default_scopes, key=f"{form_key}_scopes")
 
                 default_restrictions_raw = [] if st.session_state.get('clear_form_inputs') else st.session_state.get(f"{form_key}_restrictions", [])
-                default_restrictions = [r for r in default_restrictions_raw if r in restriction_list] # Filter invalid options
+                default_restrictions = [r for r in default_restrictions_raw if r in restriction_list] 
                 selected_restriction_names = st.multiselect("Restricciones (Aparecerá en la tarjeta)", options=restriction_list, default=default_restrictions, key=f"{form_key}_restrictions")
 
                 default_count = None if st.session_state.get('clear_form_inputs') else st.session_state.get(f'{form_key}_count')
@@ -360,25 +376,23 @@ elif app_mode == "🛠️ Creador QR":
             # --- Live Calculation Display (Inside Form, Before Submit) ---
             st.divider()
             st.subheader("Cálculo Estimado")
-            # Read values directly from widgets using their current values in this run
-            live_promo_name_calc = selected_promo_name
+            
+            live_promo_name_calc = st.session_state[f"{form_key}_promo"]
             live_promo_data_calc = promo_options.get(live_promo_name_calc, {})
-            live_vcrc_calc = value_crc
-            live_vusd_calc = value_usd
-            live_count_calc = count
+            live_vcrc_calc = st.session_state[f"{form_key}_vcrc"]
+            live_vusd_calc = st.session_state[f"{form_key}_vusd"]
+            live_count_calc = st.session_state[f"{form_key}_count"]
 
-            if (live_promo_name_calc != "-- Seleccione Promoción --" and
+            if (live_promo_name_calc and live_promo_name_calc != "-- Seleccione Promoción --" and
                     isinstance(live_vcrc_calc, (int, float)) and live_vcrc_calc >= 0 and
                     isinstance(live_vusd_calc, (int, float)) and live_vusd_calc >= 0 and
                     isinstance(live_count_calc, int) and live_count_calc > 0):
 
-                # Individual calculations
+                # (cálculos... sin cambios)
                 disc_crc_calc = db_service.calculate_discount_per_coupon(live_vcrc_calc, live_promo_data_calc)
                 disc_usd_calc = db_service.calculate_discount_per_coupon(live_vusd_calc, live_promo_data_calc)
                 sale_crc_individual = round(live_vcrc_calc - disc_crc_calc, 2)
                 sale_usd_individual = round(live_vusd_calc - disc_usd_calc, 2)
-
-                # Total calculations
                 base_total_crc_calc = round(live_vcrc_calc * live_count_calc, 2)
                 base_total_usd_calc = round(live_vusd_calc * live_count_calc, 2)
                 total_discount_crc_calc = round(disc_crc_calc * live_count_calc, 2)
@@ -409,6 +423,48 @@ elif app_mode == "🛠️ Creador QR":
                     st.metric(label="Valor Total Pagado (USD)", value=f"$ {total_sale_usd_calc:,.2f}")
             else:
                  st.caption("ℹ️ Llene todos los campos (*) para ver el cálculo.")
+            
+            # --- INICIO CAMBIO: Vista Previa en Vivo ---
+            st.divider()
+            st.subheader("Vista Previa (en vivo)")
+            
+            try:
+                # Leer valores en vivo del st.session_state (así funciona dentro de un form)
+                live_template_name = st.session_state[f"{form_key}_template"]
+                live_scopes = st.session_state.get(f"{form_key}_scopes", [])
+                live_restric = st.session_state.get(f"{form_key}_restrictions", [])
+                live_branches = st.session_state.get(f"{form_key}_branches", [])
+                live_all_branches = st.session_state.get(f"{form_key}_all_branches", False)
+                live_months = st.session_state.get(f"{form_key}_months", 3)
+
+                # Determinar ruta de plantilla en vivo
+                live_template_path = None
+                if live_template_name != "Fondo Blanco":
+                    live_template_path = os.path.join(TEMPLATE_DIR, f"{live_template_name}.png")
+                
+                # Determinar sucursales en vivo
+                live_branch_list = []
+                if not live_all_branches:
+                    live_branch_list = live_branches
+
+                preview_path = os.path.join(GENERATED_QRS_DIR, "preview.jpg")
+                
+                # Generar la imagen de vista previa
+                create_qr_card(
+                    "PREVIEW-ID-12345678",
+                    live_template_path,
+                    preview_path,
+                    live_scopes,
+                    live_restric,
+                    live_branch_list,
+                    (datetime.now() + timedelta(days=live_months * 30)).strftime("%Y-%m-%d"),
+                    "0000"
+                )
+                st.image(preview_path, caption="Vista previa generada con datos de ejemplo.")
+            except Exception as e:
+                st.error(f"No se pudo generar la vista previa: {e}")
+            # --- FIN CAMBIO: Vista Previa en Vivo ---
+
             st.divider()
 
             # --- Submit Button ---
@@ -429,6 +485,7 @@ elif app_mode == "🛠️ Creador QR":
                 restrictions_val = st.session_state[f"{form_key}_restrictions"]
                 all_branches_val = st.session_state[f"{form_key}_all_branches"]
                 branches_val = st.session_state[f"{form_key}_branches"]
+                template_name_val = st.session_state[f"{form_key}_template"] # <-- OBTENER PLANTILLA
 
                 # Perform checks
                 if not asoc_val: st.error("❌ 'Asociado' obligatorio."); error = True
@@ -438,24 +495,25 @@ elif app_mode == "🛠️ Creador QR":
                 if not type_val or type_val == "-- Seleccione Tipo --": st.error("❌ Seleccione Tipo."); error = True
                 if count_val is None or count_val <= 0: st.error("❌ Cantidad > 0."); error = True
                 if months_val is None: st.error("❌ Seleccione Meses."); error=True
-                
-                # --- CAMBIO: La única validación de sucursales es que O marque "Todas" O seleccione al menos una
                 if not all_branches_val and not branches_val: 
                     st.error("❌ Seleccione Sucursales o marque 'Todas'."); error = True
                 
-
                 if not error:
                     type_id = type_options.get(type_val)
                     user_id = st.session_state.get('user_id')
                     scope_ids = [scope_options[n] for n in scopes_val]
                     restriction_ids = [restriction_options[n] for n in restrictions_val]
                     
-                    # --- CAMBIO: Preparar lista de sucursales para la BBDD Y para la tarjeta
-                    branch_names_for_db = [] # Vacía si son todas
-                    branch_names_for_card = [] # Vacía si son todas
+                    branch_names_for_db = [] 
+                    branch_names_for_card = [] 
                     if not all_branches_val:
-                        branch_names_for_db = branches_val # Nombres para la BBDD
-                        branch_names_for_card = branches_val # Nombres para la Tarjeta
+                        branch_names_for_db = branches_val 
+                        branch_names_for_card = branches_val 
+                    
+                    # --- CAMBIO: Determinar ruta de plantilla ---
+                    template_path_val = None
+                    if template_name_val != "Fondo Blanco":
+                        template_path_val = os.path.join(TEMPLATE_DIR, f"{template_name_val}.png")
                     # --- FIN CAMBIO ---
 
                     selected_promo_data = promo_options.get(promo_val, {})
@@ -465,7 +523,7 @@ elif app_mode == "🛠️ Creador QR":
                         count=count_val, asociado_comprador=asoc_val,
                         promo_data=selected_promo_data, value_crc=vcrc_val, value_usd=vusd_val,
                         type_id=type_id, months_valid=months_val, 
-                        branch_names=branch_names_for_db, # Enviar la lista de nombres a la BBDD
+                        branch_names=branch_names_for_db, 
                         scope_ids=scope_ids, restriction_ids=restriction_ids, user_id=user_id
                     )
                     if result and result.get('coupon_entries'):
@@ -473,21 +531,20 @@ elif app_mode == "🛠️ Creador QR":
                         st.balloons()
                         generated_paths = []; coupons = result['coupon_entries']
 
-                        # --- INICIO CAMBIO: Obtener listas de texto ---
                         scopes_text_list = st.session_state[f"{form_key}_scopes"]
                         restrictions_text_list = st.session_state[f"{form_key}_restrictions"]
-                        # --- FIN CAMBIO ---
 
                         for entry in coupons:
                             path = os.path.join(GENERATED_QRS_DIR, f"{entry['consecutive']:04d}.jpg")
                             
-                            # --- CAMBIO: Pasar las listas a la función ---
+                            # --- CAMBIO: Pasar la ruta de la plantilla seleccionada ---
                             create_qr_card(
                                 entry['id'], 
+                                template_path_val, # <--- RUTA DE PLANTILLA
                                 path, 
-                                scopes_text_list, # <--- Lista de Validez
-                                restrictions_text_list, # <--- Lista de Restricciones
-                                branch_names_for_card, # <--- Lista de sucursales
+                                scopes_text_list, 
+                                restrictions_text_list, 
+                                branch_names_for_card, 
                                 entry['expiration_date'], 
                                 f"{entry['consecutive']:04d}"
                             )
@@ -499,21 +556,20 @@ elif app_mode == "🛠️ Creador QR":
                             for p in generated_paths: zf.write(p, os.path.basename(p))
                         zip_buffer.seek(0)
                         zip_filename = f"lote_{coupons[0]['batch_id']}.zip"
-                        # Save state for display outside form
+                        
                         st.session_state['last_receipt_data'] = result.get('receipt_data')
                         st.session_state['show_receipt'] = True
                         st.session_state['last_zip_buffer'] = zip_buffer
                         st.session_state['last_zip_filename'] = zip_filename
-                        # Set flag to clear inputs on next rerun
+                        
                         st.session_state['clear_form_inputs'] = True
-                        st.session_state['form_key_counter'] += 1 # Increment form key counter
-                        st.rerun() # Rerun to display receipt and clear form
+                        st.session_state['form_key_counter'] += 1 
+                        st.rerun() 
                     else:
                         st.error("🚨 Error al generar el lote. Campos NO borrados. Revise mensajes.")
                         st.session_state['show_receipt'] = False
-                        st.session_state['clear_form_inputs'] = False # Ensure form isn't cleared on error
+                        st.session_state['clear_form_inputs'] = False 
                 else:
-                    # Error occurred during validation, ensure form is NOT cleared
                     st.session_state['clear_form_inputs'] = False
 
 
@@ -523,7 +579,6 @@ elif app_mode == "🛠️ Creador QR":
             st.subheader("🧾 Recibo Generado")
             receipt_text = format_receipt(st.session_state['last_receipt_data'])
             st.code(receipt_text, language=None)
-            st.caption("Puede copiar este texto o usar Ctrl+P / Cmd+P para imprimir.")
             st.subheader("⬇️ Descargar Tarjetas (ZIP)")
             if st.session_state.get('last_zip_buffer') and st.session_state.get('last_zip_filename'):
                 st.download_button(
@@ -533,39 +588,83 @@ elif app_mode == "🛠️ Creador QR":
             if st.button("✨ Listo (Ocultar Recibo)"):
                 st.session_state['show_receipt'] = False; st.session_state['last_receipt_data'] = None
                 st.session_state['last_zip_buffer'] = None; st.session_state['last_zip_filename'] = None
-                st.session_state['clear_form_inputs'] = True # Set flag to clear on next load
-                st.session_state['form_key_counter'] += 1 # Increment key again helps ensure reset
+                st.session_state['clear_form_inputs'] = True 
+                st.session_state['form_key_counter'] += 1 
                 st.rerun()
 
-        # --- Reset clear flag after potential rerun ---
-        # Put this outside the receipt display block to ensure it runs even if receipt isn't shown
         if 'clear_form_inputs' in st.session_state:
              st.session_state['clear_form_inputs'] = False
 
 
-    # --- Gestión de Plantilla ---
+    # --- INICIO CAMBIO: Pestaña de Gestión de Plantilla (Rehecha) ---
     with tab_template:
-        st.header("Gestión de Plantilla"); st.subheader(f"1. Guía (JPG {CARD_WIDTH_MM}x{CARD_HEIGHT_MM}mm)"); st.markdown(f"Guía horizontal ({CARD_WIDTH_PX}x{CARD_HEIGHT_PX} px).")
+        st.header("Gestión de Plantillas de Diseño")
+        
+        st.subheader("1. Subir Nueva Plantilla")
+        with st.form("template_form", clear_on_submit=True):
+            template_name = st.text_input("Nombre de la Plantilla (ej: Navidad2025, DiaPadre)")
+            up_file = st.file_uploader(f"Suba PNG ({CARD_WIDTH_PX}x{CARD_HEIGHT_PX}px, Horizontal)", type="png")
+            submitted = st.form_submit_button("Guardar Plantilla")
+            
+            if submitted:
+                if not template_name:
+                    st.error("Debe ingresar un nombre para la plantilla.")
+                elif not up_file:
+                    st.error("Debe seleccionar un archivo PNG.")
+                else:
+                    save_name = f"{template_name}.png"
+                    save_path = os.path.join(TEMPLATE_DIR, save_name)
+                    
+                    if os.path.exists(save_path):
+                        st.error(f"Ya existe una plantilla con el nombre '{template_name}'. Use otro nombre.")
+                    else:
+                        try:
+                            img = Image.open(up_file)
+                            if img.size != (CARD_WIDTH_PX, CARD_HEIGHT_PX):
+                                st.error(f"Error: La imagen debe ser de {CARD_WIDTH_PX}x{CARD_HEIGHT_PX} píxeles. La subida es de {img.size[0]}x{img.size[1]}px.")
+                            else:
+                                with open(save_path, "wb") as f: 
+                                    f.write(up_file.getbuffer())
+                                st.success(f"Plantilla '{template_name}' guardada.")
+                                st.cache_data.clear() # Limpiar el cache de get_template_list
+                                st.rerun()
+                        except Exception as e:
+                            st.error(f"Error al guardar: {e}")
+
+        st.divider()
+        st.subheader("2. Plantillas Guardadas")
+        
+        templates = get_template_list()
+        if not templates:
+            st.info("No hay plantillas guardadas. Suba una para verla aquí.")
+        else:
+            for t_name in templates:
+                t_path = os.path.join(TEMPLATE_DIR, f"{t_name}.png")
+                with st.container(border=True):
+                    st.markdown(f"**Nombre:** `{t_name}`")
+                    if os.path.exists(t_path):
+                        st.image(t_path, width=400, caption=f"Vista previa de {t_name}")
+                    else:
+                        st.error("Archivo de imagen no encontrado.")
+                    
+                    if st.button("Eliminar Plantilla", key=f"delete_{t_name}", type="primary"):
+                        try:
+                            os.remove(t_path)
+                            st.success(f"Plantilla '{t_name}' eliminada.")
+                            st.cache_data.clear()
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"No se pudo eliminar: {e}")
+        
+        st.divider()
+        st.subheader("3. Guía de Diseño (JPG)")
+        st.markdown(f"Guía horizontal ({CARD_WIDTH_PX}x{CARD_HEIGHT_PX} px).")
         BLANK_JPG = os.path.join(TEMPLATE_DIR, "plantilla_guia.jpg")
         if st.button("Generar/Descargar Guía JPG", key="dl_guide"):
             generate_design_template(BLANK_JPG);
-            with open(BLANK_JPG, "rb") as f: st.download_button("Descargar Guía (JPG)", f, os.path.basename(BLANK_JPG), "image/jpeg", key="dl_guide_btn")
-        st.markdown("---"); st.subheader(f"2. Subir Plantilla (PNG {CARD_WIDTH_PX}x{CARD_HEIGHT_PX}px)")
-        up_file = st.file_uploader(f"Suba PNG ({CARD_WIDTH_PX}x{CARD_HEIGHT_PX}px, Horizontal)", type="png", key="up_tmpl")
-        if up_file:
-            save_path = os.path.join(TEMPLATE_DIR, "plantilla_arte_activa.png")
-            try:
-                # Validar dimensiones al subir
-                img = Image.open(up_file)
-                if img.size != (CARD_WIDTH_PX, CARD_HEIGHT_PX):
-                    st.error(f"Error: La imagen debe ser de {CARD_WIDTH_PX}x{CARD_HEIGHT_PX} píxeles. La imagen subida es de {img.size[0]}x{img.size[1]} píxeles.")
-                else:
-                    with open(save_path, "wb") as f: f.write(up_file.getbuffer())
-                    st.session_state[TEMPLATE_PATH_KEY] = save_path; st.success(f"Plantilla cargada: {up_file.name}")
-            except Exception as e: st.error(f"Error al guardar: {e}")
-        current_template = st.session_state.get(TEMPLATE_PATH_KEY)
-        if current_template and os.path.exists(current_template): st.info(f"🎨 Plantilla Actual: {os.path.basename(current_template)}")
-        else: st.warning("No hay plantilla. Se usará fondo blanco.")
+            with open(BLANK_JPG, "rb") as f: 
+                st.download_button("Descargar Guía (JPG)", f, os.path.basename(BLANK_JPG), "image/jpeg", key="dl_guide_btn")
+    # --- FIN CAMBIO: Pestaña de Gestión de Plantilla ---
 
 
 # --- MÓDULO REPORTES ---
