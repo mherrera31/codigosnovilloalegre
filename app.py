@@ -1,4 +1,4 @@
-# app.py (VERSIÓN CORREGIDA - Muestra Validez/Restricciones)
+# app.py (VERSIÓN CORREGIDA - Usa getlength/getbbox)
 import streamlit as st
 import auth
 import db_service
@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 import pandas as pd
 import zipfile
 import io
-import textwrap # <-- IMPORTANTE: Añadir esta librería
+import textwrap 
 
 # --- CONFIGURACIÓN Y CONSTANTES ---
 st.set_page_config(page_title="Sistema QR Novillo Alegre", layout="wide")
@@ -69,18 +69,18 @@ def create_qr_card(data_to_encode: str, output_path: str, description: str, expi
 
     draw = ImageDraw.Draw(card_img)
     
-    # Cargar 3 fuentes
+    # Cargar 3 fuentes (CON TUS TAMAÑOS)
     try:
-        desc_font = ImageFont.truetype("arial.ttf", size=55) # Restricciones
-        exp_font = ImageFont.truetype("arial.ttf", size=70)  # Fecha
-        consecutive_font = ImageFont.truetype("arialbd.ttf", size=100) # Consecutivo (Negrita, 55)
+        desc_font = ImageFont.truetype("arial.ttf", size=55) # Restricciones (Tu tamaño 55)
+        exp_font = ImageFont.truetype("arial.ttf", size=90)  # Fecha (Tu tamaño 90)
+        consecutive_font = ImageFont.truetype("arialbd.ttf", size=100) # Consecutivo (Tu tamaño 100)
     except IOError:
         desc_font = exp_font = consecutive_font = ImageFont.load_default()
 
     # Generar QR
     qr = qrcode.QRCode(1, qrcode.constants.ERROR_CORRECT_M, 8, 2); qr.add_data(data_to_encode); qr.make(fit=True); qr_img = qr.make_image(fill_color="black", back_color="white").convert('RGB')
     
-    # --- INICIO CAMBIO: Lógica de Posiciones y Text Wrap ---
+    # --- INICIO CORRECCIÓN DE ERROR: Lógica de Posiciones ---
     
     # 1. Textos
     exp_text = f"Válido hasta: {expiration}"
@@ -91,13 +91,9 @@ def create_qr_card(data_to_encode: str, output_path: str, description: str, expi
     QR_Y = BORDER_PX + 50 
     QR_POS = (int(QR_X), int(QR_Y))
 
-    # 3. Calcular anchos de Consecutivo y Fecha
-    try:
-        exp_width = draw.textlength(exp_text, font=exp_font)
-        cons_width = draw.textlength(cons_text, font=consecutive_font)
-    except AttributeError: # Fallback
-        exp_width = exp_font.getsize(exp_text)[0]
-        cons_width = consecutive_font.getsize(cons_text)[0]
+    # 3. Calcular anchos (MÉTODO MODERNO: .getlength())
+    exp_width = exp_font.getlength(exp_text)
+    cons_width = consecutive_font.getlength(cons_text)
 
     # 4. Posición Consecutivo (Centrado debajo del QR)
     CONS_X_CENTERED_ON_QR = (QR_X + (QR_SIZE_PX / 2)) - (cons_width / 2)
@@ -106,32 +102,33 @@ def create_qr_card(data_to_encode: str, output_path: str, description: str, expi
 
     # 5. Posición Fecha (Inferior Central, última línea)
     EXP_X_CENTERED_ON_CARD = (CARD_WIDTH_PX / 2) - (exp_width / 2)
-    EXP_Y_BOTTOM = CARD_HEIGHT_PX - BORDER_PX - 40 # Base - Borde - AltoFuente
+    # Alto de la fuente de fecha (MÉTODO MODERNO: .getbbox())
+    exp_bbox = exp_font.getbbox("A")
+    exp_height = exp_bbox[3] - exp_bbox[1]
+    EXP_Y_BOTTOM = CARD_HEIGHT_PX - BORDER_PX - exp_height
     EXP_POS = (int(EXP_X_CENTERED_ON_CARD), int(EXP_Y_BOTTOM))
 
     # 6. Lógica de Text Wrap para Restricciones/Validez (description)
     
-    # Ancho máximo en caracteres (aprox. 45 chars para fuente 36)
-    WRAP_CHARS = 45 
+    WRAP_CHARS = 45 # Mantener 45 caracteres de ancho
     wrapped_lines = textwrap.wrap(description, width=WRAP_CHARS)
     
-    # Calcular Y inicial para las líneas (empezando desde arriba de la fecha)
-    line_height = desc_font.getsize("A")[1] + 5 # Alto de fuente + 5px padding
-    # Posicionar el bloque de texto justo arriba de la fecha
-    current_y = EXP_Y_BOTTOM - (len(wrapped_lines) * line_height) - 10 # 10px padding arriba de la fecha
+    # Calcular Y inicial (MÉTODO MODERNO: .getbbox())
+    # Esta fue la línea que dio el error (usaba .getsize())
+    desc_bbox = desc_font.getbbox("A")
+    line_height = (desc_bbox[3] - desc_bbox[1]) + 5 # Alto (bottom-top) + 5px padding
+    
+    current_y = EXP_Y_BOTTOM - (len(wrapped_lines) * line_height) - 10 
     
     # Dibujar cada línea de texto (restricciones)
     for line in wrapped_lines:
-        try:
-            line_width = draw.textlength(line, font=desc_font)
-        except AttributeError:
-            line_width = desc_font.getsize(line)[0]
+        line_width = desc_font.getlength(line)
         
         LINE_X_CENTERED = (CARD_WIDTH_PX / 2) - (line_width / 2)
         draw.text((int(LINE_X_CENTERED), int(current_y)), line, fill=(0,0,0), font=desc_font)
-        current_y += line_height # Mover a la siguiente línea
+        current_y += line_height 
     
-    # --- FIN LÓGICA DE POSICIONES ---
+    # --- FIN CORRECCIÓN DE ERROR ---
 
     # Dibujar Textos (Consecutivo y Fecha)
     draw.text(CONS_POS, cons_text, fill=(0,0,0), font=consecutive_font)
