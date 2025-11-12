@@ -1,4 +1,4 @@
-# app.py (VERSIÓN CORREGIDA - Layout solicitado por usuario)
+# app.py (VERSIÓN CORREGIDA - Muestra Validez/Restricciones)
 import streamlit as st
 import auth
 import db_service
@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 import pandas as pd
 import zipfile
 import io
+import textwrap # <-- IMPORTANTE: Añadir esta librería
 
 # --- CONFIGURACIÓN Y CONSTANTES ---
 st.set_page_config(page_title="Sistema QR Novillo Alegre", layout="wide")
@@ -48,7 +49,10 @@ if 'clear_form_inputs' not in st.session_state: st.session_state['clear_form_inp
 
 # --- FUNCIONES AUXILIARES ---
 def create_qr_card(data_to_encode: str, output_path: str, description: str, expiration: str, consecutive: str):
-    """Genera JPG de tarjeta 8.5x5cm con QR, usando plantilla PNG si existe."""
+    """
+    Genera JPG de tarjeta 8.5x5cm con QR.
+    'description' AHORA SE REFIERE AL TEXTO COMBINADO DE VALIDEZ/RESTRICCIONES.
+    """
     template_path = st.session_state.get(TEMPLATE_PATH_KEY)
     card_img = None
     try:
@@ -65,59 +69,71 @@ def create_qr_card(data_to_encode: str, output_path: str, description: str, expi
 
     draw = ImageDraw.Draw(card_img)
     
-    # --- INICIO CAMBIO: Cargar 3 fuentes ---
+    # Cargar 3 fuentes
     try:
-        desc_font = ImageFont.truetype("arial.ttf", size=45) # Restricciones
-        exp_font = ImageFont.truetype("arial.ttf", size=60)  # Fecha
-        consecutive_font = ImageFont.truetype("arialbd.ttf", size=80) # Consecutivo (Negrita, 55)
+        desc_font = ImageFont.truetype("arial.ttf", size=55) # Restricciones
+        exp_font = ImageFont.truetype("arial.ttf", size=70)  # Fecha
+        consecutive_font = ImageFont.truetype("arialbd.ttf", size=100) # Consecutivo (Negrita, 55)
     except IOError:
         desc_font = exp_font = consecutive_font = ImageFont.load_default()
-    # --- FIN CAMBIO ---
 
     # Generar QR
     qr = qrcode.QRCode(1, qrcode.constants.ERROR_CORRECT_M, 8, 2); qr.add_data(data_to_encode); qr.make(fit=True); qr_img = qr.make_image(fill_color="black", back_color="white").convert('RGB')
     
-    # --- INICIO CAMBIO: Lógica de Posiciones ---
+    # --- INICIO CAMBIO: Lógica de Posiciones y Text Wrap ---
     
     # 1. Textos
-    desc_text = description
     exp_text = f"Válido hasta: {expiration}"
-    cons_text = f"{consecutive}" # CAMBIO: Sin la palabra "CONSECUTIVO:"
+    cons_text = f"{consecutive}" # Sin la palabra "CONSECUTIVO:"
     
-    # 2. Calcular anchos
-    try:
-        desc_width = draw.textlength(desc_text, font=desc_font)
-        exp_width = draw.textlength(exp_text, font=exp_font)
-        cons_width = draw.textlength(cons_text, font=consecutive_font)
-    except AttributeError: # Fallback
-        desc_width = desc_font.getsize(desc_text)[0]
-        exp_width = exp_font.getsize(exp_text)[0]
-        cons_width = consecutive_font.getsize(cons_text)[0]
-
-    # 3. Posición QR (Global, derecha, movido un poco hacia arriba)
+    # 2. Posición QR (Global, derecha, movido un poco hacia arriba)
     QR_X = CARD_WIDTH_PX - QR_SIZE_PX - BORDER_PX
     QR_Y = BORDER_PX + 50 
     QR_POS = (int(QR_X), int(QR_Y))
+
+    # 3. Calcular anchos de Consecutivo y Fecha
+    try:
+        exp_width = draw.textlength(exp_text, font=exp_font)
+        cons_width = draw.textlength(cons_text, font=consecutive_font)
+    except AttributeError: # Fallback
+        exp_width = exp_font.getsize(exp_text)[0]
+        cons_width = consecutive_font.getsize(cons_text)[0]
 
     # 4. Posición Consecutivo (Centrado debajo del QR)
     CONS_X_CENTERED_ON_QR = (QR_X + (QR_SIZE_PX / 2)) - (cons_width / 2)
     CONS_Y = QR_Y + QR_SIZE_PX + 20 # 20px padding bajo el QR
     CONS_POS = (int(CONS_X_CENTERED_ON_QR), int(CONS_Y))
 
-    # 5. Posición Restricciones (Inferior Central, Línea 1)
-    DESC_X_CENTERED_ON_CARD = (CARD_WIDTH_PX / 2) - (desc_width / 2)
-    DESC_Y_BOTTOM = CARD_HEIGHT_PX - BORDER_PX - 40 - 45 # Base - Borde - AltoFecha - Padding
-    PROMO_POS = (int(DESC_X_CENTERED_ON_CARD), int(DESC_Y_BOTTOM))
-    
-    # 6. Posición Fecha (Inferior Central, Línea 2)
+    # 5. Posición Fecha (Inferior Central, última línea)
     EXP_X_CENTERED_ON_CARD = (CARD_WIDTH_PX / 2) - (exp_width / 2)
-    EXP_Y_BOTTOM = CARD_HEIGHT_PX - BORDER_PX - 40 # Base - Borde - AltoFecha
+    EXP_Y_BOTTOM = CARD_HEIGHT_PX - BORDER_PX - 40 # Base - Borde - AltoFuente
     EXP_POS = (int(EXP_X_CENTERED_ON_CARD), int(EXP_Y_BOTTOM))
 
+    # 6. Lógica de Text Wrap para Restricciones/Validez (description)
+    
+    # Ancho máximo en caracteres (aprox. 45 chars para fuente 36)
+    WRAP_CHARS = 45 
+    wrapped_lines = textwrap.wrap(description, width=WRAP_CHARS)
+    
+    # Calcular Y inicial para las líneas (empezando desde arriba de la fecha)
+    line_height = desc_font.getsize("A")[1] + 5 # Alto de fuente + 5px padding
+    # Posicionar el bloque de texto justo arriba de la fecha
+    current_y = EXP_Y_BOTTOM - (len(wrapped_lines) * line_height) - 10 # 10px padding arriba de la fecha
+    
+    # Dibujar cada línea de texto (restricciones)
+    for line in wrapped_lines:
+        try:
+            line_width = draw.textlength(line, font=desc_font)
+        except AttributeError:
+            line_width = desc_font.getsize(line)[0]
+        
+        LINE_X_CENTERED = (CARD_WIDTH_PX / 2) - (line_width / 2)
+        draw.text((int(LINE_X_CENTERED), int(current_y)), line, fill=(0,0,0), font=desc_font)
+        current_y += line_height # Mover a la siguiente línea
+    
     # --- FIN LÓGICA DE POSICIONES ---
 
-    # Dibujar Textos
-    draw.text(PROMO_POS, desc_text, fill=(0,0,0), font=desc_font)
+    # Dibujar Textos (Consecutivo y Fecha)
     draw.text(CONS_POS, cons_text, fill=(0,0,0), font=consecutive_font)
     draw.text(EXP_POS, exp_text, fill=(100,100,100), font=exp_font)
     
@@ -247,7 +263,7 @@ elif app_mode == "🛠️ Creador QR":
                 current_promo_sel = st.session_state.get(f"{form_key}_promo")
                 if not st.session_state.get('clear_form_inputs') and current_promo_sel in promo_list: promo_index = promo_list.index(current_promo_sel)
                 selected_promo_name = st.selectbox("Promoción/Diseño (*Obligatorio*)", options=promo_list, index=promo_index, key=f"{form_key}_promo")
-                st.caption(f"Descripción (Canje): {promo_options.get(selected_promo_name, {}).get('description', 'N/A')}")
+                st.caption(f"Descrip. de Promoción (Solo referencia): {promo_options.get(selected_promo_name, {}).get('description', 'N/A')}")
 
                 default_vcrc = None if st.session_state.get('clear_form_inputs') else st.session_state.get(f"{form_key}_vcrc")
                 default_vusd = None if st.session_state.get('clear_form_inputs') else st.session_state.get(f"{form_key}_vusd")
@@ -276,11 +292,11 @@ elif app_mode == "🛠️ Creador QR":
 
                 default_scopes_raw = [] if st.session_state.get('clear_form_inputs') else st.session_state.get(f"{form_key}_scopes", [])
                 default_scopes = [s for s in default_scopes_raw if s in scope_list] # Filter invalid options
-                selected_scope_names = st.multiselect("Validez Cupón (*Obligatorio*)", options=scope_list, default=default_scopes, key=f"{form_key}_scopes")
+                selected_scope_names = st.multiselect("Validez Cupón (Aparecerá en la tarjeta)", options=scope_list, default=default_scopes, key=f"{form_key}_scopes")
 
                 default_restrictions_raw = [] if st.session_state.get('clear_form_inputs') else st.session_state.get(f"{form_key}_restrictions", [])
                 default_restrictions = [r for r in default_restrictions_raw if r in restriction_list] # Filter invalid options
-                selected_restriction_names = st.multiselect("Restricciones (*Obligatorio*)", options=restriction_list, default=default_restrictions, key=f"{form_key}_restrictions")
+                selected_restriction_names = st.multiselect("Restricciones (Aparecerá en la tarjeta)", options=restriction_list, default=default_restrictions, key=f"{form_key}_restrictions")
 
                 default_count = None if st.session_state.get('clear_form_inputs') else st.session_state.get(f'{form_key}_count')
                 count = st.number_input("Cantidad (*Obligatorio*)", min_value=1, max_value=1000, value=default_count, placeholder="1", key=f'{form_key}_count')
@@ -367,8 +383,11 @@ elif app_mode == "🛠️ Creador QR":
                 if count_val is None or count_val <= 0: st.error("❌ Cantidad > 0."); error = True
                 if months_val is None: st.error("❌ Seleccione Meses."); error=True
                 if not all_branches_val and not branches_val: st.error("❌ Seleccione Sucursales o marque 'Todas'."); error = True
-                if not scopes_val: st.error("❌ Seleccione Validez."); error = True
-                if not restrictions_val: st.error("❌ Seleccione Restricciones."); error = True
+                
+                # --- CAMBIO: Validez y Restricciones ahora no son obligatorias en el form, ---
+                # pero las leeremos para la tarjeta. Si están vacías, no pasa nada.
+                # if not scopes_val: st.error("❌ Seleccione Validez."); error = True
+                # if not restrictions_val: st.error("❌ Seleccione Restricciones."); error = True
 
                 if not error:
                     type_id = type_options.get(type_val)
@@ -389,9 +408,33 @@ elif app_mode == "🛠️ Creador QR":
                         st.success("✅ ¡Lote y recibo generados!")
                         st.balloons()
                         generated_paths = []; coupons = result['coupon_entries']
+
+                        # --- INICIO CAMBIO: Combinar texto para la tarjeta ---
+                        # Obtener las listas de texto de Validez y Restricciones del formulario
+                        scopes_text_list = st.session_state[f"{form_key}_scopes"]
+                        restrictions_text_list = st.session_state[f"{form_key}_restrictions"]
+                        
+                        all_conditions = scopes_text_list + restrictions_text_list
+                        
+                        if not all_conditions:
+                            text_for_card = "" # Dejar vacío si no se selecciona nada
+                        else:
+                            text_for_card = ". ".join(all_conditions)
+                        # --- FIN CAMBIO ---
+
                         for entry in coupons:
                             path = os.path.join(GENERATED_QRS_DIR, f"{entry['consecutive']:04d}.jpg")
-                            create_qr_card(entry['id'], path, selected_promo_data.get('description','N/A'), entry['expiration_date'], f"{entry['consecutive']:04d}")
+                            
+                            # --- CAMBIO: Pasar el nuevo texto a la función ---
+                            create_qr_card(
+                                entry['id'], 
+                                path, 
+                                text_for_card, # <--- Texto combinado
+                                entry['expiration_date'], 
+                                f"{entry['consecutive']:04d}"
+                            )
+                            # --- FIN CAMBIO ---
+
                             generated_paths.append(path)
                         zip_buffer = io.BytesIO()
                         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
