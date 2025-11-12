@@ -1,4 +1,4 @@
-# app.py (VERSIÓN CORREGIDA - Administrador de Plantillas y Vista Previa)
+# app.py (VERSIÓN CORREGIDA - Integrado con Supabase Storage)
 import streamlit as st
 import auth
 import db_service
@@ -13,13 +13,17 @@ import pandas as pd
 import zipfile
 import io
 import textwrap 
+# --- INICIO CAMBIO: Nuevos imports para Supabase ---
+from supabase import create_client, Client
+from db_config import SUPABASE_URL # Importar la URL base
+# --- FIN CAMBIO ---
 
 # --- CONFIGURACIÓN Y CONSTANTES ---
 st.set_page_config(page_title="Sistema QR Novillo Alegre", layout="wide")
 LOGO_URL = "https://placehold.co/300x100/1E3260/FFFFFF/png?text=Novillo+Alegre+QR"
+# El directorio local de plantillas solo se usa para la guía
 TEMPLATE_DIR = 'design_templates'; os.makedirs(TEMPLATE_DIR, exist_ok=True)
 GENERATED_QRS_DIR = 'generated_qrs'; os.makedirs(GENERATED_QRS_DIR, exist_ok=True)
-# Se elimina TEMPLATE_PATH_KEY, ya no se usa
 
 # --- TAMAÑO 8.5cm x 5cm ---
 CARD_WIDTH_PX = 1004 
@@ -30,13 +34,27 @@ CARD_HEIGHT_MM = 50
 
 QR_SIZE_PX = 250; BORDER_PX = 50
 
+# --- INICIO CAMBIO: Inicializar Supabase Client para Storage ---
+try:
+    # Usar la URL de db_config y la Llave de Servicio de los secretos
+    SUPABASE_SERVICE_KEY = st.secrets["SUPABASE_SERVICE_KEY"]
+    supabase_client: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+    BUCKET_NAME = "plantillas"
+except KeyError:
+    st.error("Error: Secreto 'SUPABASE_SERVICE_KEY' no encontrado. Por favor configúralo en Streamlit Cloud.")
+    st.stop()
+except Exception as e:
+    st.error(f"Error al inicializar Supabase: {e}")
+    st.stop()
+# --- FIN CAMBIO ---
+
+
 # --- Inicialización de Estado ---
 if 'logged_in' not in st.session_state: st.session_state['logged_in'] = False
 if 'user_role' not in st.session_state: st.session_state['user_role'] = None
 if 'username' not in st.session_state: st.session_state['username'] = 'N/A' 
 if 'user_id' not in st.session_state: st.session_state['user_id'] = None
 if 'branch_id' not in st.session_state: st.session_state['branch_id'] = None
-# Se elimina la inicialización de TEMPLATE_PATH_KEY
 if 'last_receipt_data' not in st.session_state: st.session_state['last_receipt_data'] = None
 if 'show_receipt' not in st.session_state: st.session_state['show_receipt'] = False
 if 'last_zip_buffer' not in st.session_state: st.session_state['last_zip_buffer'] = None
@@ -45,27 +63,26 @@ if 'selected_receipt_id' not in st.session_state: st.session_state['selected_rec
 if 'form_key_counter' not in st.session_state: st.session_state['form_key_counter'] = 0
 if 'clear_form_inputs' not in st.session_state: st.session_state['clear_form_inputs'] = False
 
-# --- NUEVA FUNCIÓN: Obtener lista de plantillas ---
+# --- CAMBIO: Obtener lista de plantillas desde Supabase Storage ---
 @st.cache_data(ttl=60) # Cache por 60 segundos
 def get_template_list():
-    if not os.path.exists(TEMPLATE_DIR):
-        return []
     try:
-        # Devuelve solo los nombres de archivo .png, sin la extensión
+        files = supabase_client.storage.from_(BUCKET_NAME).list()
+        # Filtrar solo PNGs y quitar la extensión
         return sorted([
-            f.replace('.png', '') 
-            for f in os.listdir(TEMPLATE_DIR) 
-            if f.endswith('.png') and f != "plantilla_guia.jpg"
+            f['name'].replace('.png', '') 
+            for f in files 
+            if f['name'].endswith('.png')
         ])
     except Exception as e:
-        st.error(f"Error al leer directorio de plantillas: {e}")
+        st.error(f"Error al listar plantillas del bucket: {e}")
         return []
 
 # --- FUNCIONES AUXILIARES ---
-# --- INICIO CAMBIO: La función ahora recibe template_path ---
+# --- INICIO CAMBIO: La función ahora recibe template_name ---
 def create_qr_card(
     data_to_encode: str, 
-    template_path: str, # <-- CAMBIO: Se pasa la ruta de la plantilla
+    template_name: str, # <-- CAMBIO: Nombre, no ruta
     output_path: str, 
     scopes_text_list: list, 
     restrictions_text_list: list, 
@@ -79,13 +96,17 @@ def create_qr_card(
     """
     card_img = None
     try:
-        # --- CAMBIO: Usar el template_path_argumento, no el session_state ---
-        if template_path and os.path.exists(template_path):
-            card_img = Image.open(template_path).convert('RGB')
+        # --- CAMBIO: Descargar de Supabase si se provee un nombre ---
+        if template_name:
+            # Descargar los bytes del archivo desde el bucket
+            file_bytes = supabase_client.storage.from_(BUCKET_NAME).download(f"{template_name}.png")
+            # Abrir los bytes en memoria
+            card_img = Image.open(io.BytesIO(file_bytes)).convert('RGB')
             if card_img.size != (CARD_WIDTH_PX, CARD_HEIGHT_PX):
                 card_img = card_img.resize((CARD_WIDTH_PX, CARD_HEIGHT_PX))
     except Exception as e:
-        st.error(f"Err Plantilla: {e}. Fondo blanco.")
+        st.error(f"Error al cargar plantilla '{template_name}': {e}. Usando fondo blanco.")
+        card_img = None # Forzar fondo blanco si la descarga falla
 
     # Si no hay plantilla (o falla), crea fondo blanco
     if card_img is None: 
@@ -194,6 +215,8 @@ def create_qr_card(
     qr_scaled = qr_img.resize((QR_SIZE_PX, QR_SIZE_PX))
     card_img.paste(qr_scaled, QR_POS)
 
+    # --- CAMBIO: Guardar en disco local (temporal) ---
+    # El ZIP tomará el archivo de aquí.
     card_img.save(output_path, "JPEG", quality=95); return output_path
 
 def generate_design_template(output_filename):
@@ -307,9 +330,8 @@ elif app_mode == "🛠️ Creador QR":
             scope_list = sorted(list(scope_options.keys()))
             restriction_list = sorted(list(restriction_options.keys()))
             
-            # --- INICIO CAMBIO: Selector de Plantilla ---
-            template_list = ["Fondo Blanco"] + get_template_list()
-            # Usar st.session_state.get para mantener la selección si el formulario falla
+            # --- INICIO CAMBIO: Selector de Plantilla (usa Supabase) ---
+            template_list = ["Fondo Blanco"] + get_template_list() # Llama a la nueva función
             default_template_index = 0
             current_template_sel = st.session_state.get(f"{form_key}_template")
             if not st.session_state.get('clear_form_inputs') and current_template_sel in template_list:
@@ -424,23 +446,23 @@ elif app_mode == "🛠️ Creador QR":
             else:
                  st.caption("ℹ️ Llene todos los campos (*) para ver el cálculo.")
             
-            # --- INICIO CAMBIO: Vista Previa en Vivo ---
+            # --- INICIO CAMBIO: Vista Previa en Vivo (usa Supabase) ---
             st.divider()
             st.subheader("Vista Previa (en vivo)")
             
             try:
-                # Leer valores en vivo del st.session_state (así funciona dentro de un form)
-                live_template_name = st.session_state[f"{form_key}_template"]
+                # Leer valores en vivo del st.session_state
+                live_template_name_str = st.session_state[f"{form_key}_template"]
                 live_scopes = st.session_state.get(f"{form_key}_scopes", [])
                 live_restric = st.session_state.get(f"{form_key}_restrictions", [])
                 live_branches = st.session_state.get(f"{form_key}_branches", [])
                 live_all_branches = st.session_state.get(f"{form_key}_all_branches", False)
                 live_months = st.session_state.get(f"{form_key}_months", 3)
 
-                # Determinar ruta de plantilla en vivo
-                live_template_path = None
-                if live_template_name != "Fondo Blanco":
-                    live_template_path = os.path.join(TEMPLATE_DIR, f"{live_template_name}.png")
+                # Determinar nombre de plantilla en vivo
+                template_name_for_preview = None
+                if live_template_name_str != "Fondo Blanco":
+                    template_name_for_preview = live_template_name_str # Solo el nombre
                 
                 # Determinar sucursales en vivo
                 live_branch_list = []
@@ -452,7 +474,7 @@ elif app_mode == "🛠️ Creador QR":
                 # Generar la imagen de vista previa
                 create_qr_card(
                     "PREVIEW-ID-12345678",
-                    live_template_path,
+                    template_name_for_preview, # <--- CAMBIO
                     preview_path,
                     live_scopes,
                     live_restric,
@@ -510,10 +532,10 @@ elif app_mode == "🛠️ Creador QR":
                         branch_names_for_db = branches_val 
                         branch_names_for_card = branches_val 
                     
-                    # --- CAMBIO: Determinar ruta de plantilla ---
-                    template_path_val = None
+                    # --- CAMBIO: Determinar nombre de plantilla ---
+                    template_name_for_submit = None
                     if template_name_val != "Fondo Blanco":
-                        template_path_val = os.path.join(TEMPLATE_DIR, f"{template_name_val}.png")
+                        template_name_for_submit = template_name_val
                     # --- FIN CAMBIO ---
 
                     selected_promo_data = promo_options.get(promo_val, {})
@@ -537,10 +559,10 @@ elif app_mode == "🛠️ Creador QR":
                         for entry in coupons:
                             path = os.path.join(GENERATED_QRS_DIR, f"{entry['consecutive']:04d}.jpg")
                             
-                            # --- CAMBIO: Pasar la ruta de la plantilla seleccionada ---
+                            # --- CAMBIO: Pasar el nombre de la plantilla seleccionada ---
                             create_qr_card(
                                 entry['id'], 
-                                template_path_val, # <--- RUTA DE PLANTILLA
+                                template_name_for_submit, # <--- CAMBIO
                                 path, 
                                 scopes_text_list, 
                                 restrictions_text_list, 
@@ -596,15 +618,15 @@ elif app_mode == "🛠️ Creador QR":
              st.session_state['clear_form_inputs'] = False
 
 
-    # --- INICIO CAMBIO: Pestaña de Gestión de Plantilla (Rehecha) ---
+    # --- INICIO CAMBIO: Pestaña de Gestión de Plantilla (Rehecha para Supabase) ---
     with tab_template:
-        st.header("Gestión de Plantillas de Diseño")
+        st.header("Gestión de Plantillas de Diseño (en Supabase)")
         
         st.subheader("1. Subir Nueva Plantilla")
         with st.form("template_form", clear_on_submit=True):
             template_name = st.text_input("Nombre de la Plantilla (ej: Navidad2025, DiaPadre)")
             up_file = st.file_uploader(f"Suba PNG ({CARD_WIDTH_PX}x{CARD_HEIGHT_PX}px, Horizontal)", type="png")
-            submitted = st.form_submit_button("Guardar Plantilla")
+            submitted = st.form_submit_button("Guardar Plantilla en Supabase")
             
             if submitted:
                 if not template_name:
@@ -613,44 +635,54 @@ elif app_mode == "🛠️ Creador QR":
                     st.error("Debe seleccionar un archivo PNG.")
                 else:
                     save_name = f"{template_name}.png"
-                    save_path = os.path.join(TEMPLATE_DIR, save_name)
                     
-                    if os.path.exists(save_path):
+                    # Verificar si ya existe en Supabase
+                    existing_templates = get_template_list()
+                    if template_name in existing_templates:
                         st.error(f"Ya existe una plantilla con el nombre '{template_name}'. Use otro nombre.")
                     else:
                         try:
+                            # Validar dimensiones
                             img = Image.open(up_file)
                             if img.size != (CARD_WIDTH_PX, CARD_HEIGHT_PX):
                                 st.error(f"Error: La imagen debe ser de {CARD_WIDTH_PX}x{CARD_HEIGHT_PX} píxeles. La subida es de {img.size[0]}x{img.size[1]}px.")
                             else:
-                                with open(save_path, "wb") as f: 
-                                    f.write(up_file.getbuffer())
-                                st.success(f"Plantilla '{template_name}' guardada.")
+                                # Subir a Supabase Storage
+                                file_bytes = up_file.getbuffer()
+                                supabase_client.storage.from_(BUCKET_NAME).upload(
+                                    file_path=save_name,
+                                    file=file_bytes,
+                                    file_options={"content-type": "image/png"}
+                                )
+                                st.success(f"Plantilla '{template_name}' guardada en el bucket.")
                                 st.cache_data.clear() # Limpiar el cache de get_template_list
                                 st.rerun()
                         except Exception as e:
-                            st.error(f"Error al guardar: {e}")
+                            st.error(f"Error al guardar en Supabase: {e}")
 
         st.divider()
-        st.subheader("2. Plantillas Guardadas")
+        st.subheader("2. Plantillas Guardadas en el Bucket")
         
         templates = get_template_list()
         if not templates:
-            st.info("No hay plantillas guardadas. Suba una para verla aquí.")
+            st.info("No hay plantillas guardadas en el bucket 'plantillas'.")
         else:
             for t_name in templates:
-                t_path = os.path.join(TEMPLATE_DIR, f"{t_name}.png")
                 with st.container(border=True):
                     st.markdown(f"**Nombre:** `{t_name}`")
-                    if os.path.exists(t_path):
-                        st.image(t_path, width=400, caption=f"Vista previa de {t_name}")
-                    else:
-                        st.error("Archivo de imagen no encontrado.")
+                    
+                    # Obtener URL pública para st.image
+                    try:
+                        public_url = supabase_client.storage.from_(BUCKET_NAME).get_public_url(f"{t_name}.png")
+                        st.image(public_url, width=400, caption=f"Vista previa de {t_name}")
+                    except Exception as e:
+                        st.error(f"No se pudo cargar la imagen: {e}")
                     
                     if st.button("Eliminar Plantilla", key=f"delete_{t_name}", type="primary"):
                         try:
-                            os.remove(t_path)
-                            st.success(f"Plantilla '{t_name}' eliminada.")
+                            # Borrar de Supabase
+                            supabase_client.storage.from_(BUCKET_NAME).remove([f"{t_name}.png"])
+                            st.success(f"Plantilla '{t_name}' eliminada del bucket.")
                             st.cache_data.clear()
                             st.rerun()
                         except Exception as e:
@@ -659,11 +691,12 @@ elif app_mode == "🛠️ Creador QR":
         st.divider()
         st.subheader("3. Guía de Diseño (JPG)")
         st.markdown(f"Guía horizontal ({CARD_WIDTH_PX}x{CARD_HEIGHT_PX} px).")
-        BLANK_JPG = os.path.join(TEMPLATE_DIR, "plantilla_guia.jpg")
+        # La guía se sigue generando localmente solo para la descarga
+        BLANK_JPG_GUIDE = os.path.join(TEMPLATE_DIR, "plantilla_guia.jpg")
         if st.button("Generar/Descargar Guía JPG", key="dl_guide"):
-            generate_design_template(BLANK_JPG);
-            with open(BLANK_JPG, "rb") as f: 
-                st.download_button("Descargar Guía (JPG)", f, os.path.basename(BLANK_JPG), "image/jpeg", key="dl_guide_btn")
+            generate_design_template(BLANK_JPG_GUIDE);
+            with open(BLANK_JPG_GUIDE, "rb") as f: 
+                st.download_button("Descargar Guía (JPG)", f, os.path.basename(BLANK_JPG_GUIDE), "image/jpeg", key="dl_guide_btn")
     # --- FIN CAMBIO: Pestaña de Gestión de Plantilla ---
 
 
