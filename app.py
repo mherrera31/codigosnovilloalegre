@@ -1,4 +1,4 @@
-# app.py (VERSIÓN CORREGIDA - Añadido encoding="utf-8" para tildes/ñ)
+# app.py (VERSIÓN CORREGIDA - Usa fuente local DejaVuSans para tildes/ñ)
 import streamlit as st
 import auth
 import db_service
@@ -78,13 +78,15 @@ def create_qr_card(
 
     draw = ImageDraw.Draw(card_img)
     
-    # --- INICIO CAMBIO: Cargar 4 fuentes con encoding="utf-8" ---
+    # --- INICIO CAMBIO: Cargar 4 fuentes locales (DejaVuSans) con encoding="utf-8" ---
     try:
-        desc_font = ImageFont.truetype("arial.ttf", size=36, encoding="utf-8") # Validez/Restricciones
-        exp_font = ImageFont.truetype("arial.ttf", size=30, encoding="utf-8")  # Fecha
-        consecutive_font = ImageFont.truetype("arialbd.ttf", size=65, encoding="utf-8") # Consecutivo (Negrita, 65)
-        sucursal_font = ImageFont.truetype("arial.ttf", size=28, encoding="utf-8") # Sucursales
+        # Asegúrate de haber subido 'DejaVuSans.ttf' y 'DejaVuSans-Bold.ttf'
+        desc_font = ImageFont.truetype("DejaVuSans.ttf", size=36, encoding="utf-8") # Validez/Restricciones
+        exp_font = ImageFont.truetype("DejaVuSans.ttf", size=30, encoding="utf-8")  # Fecha
+        consecutive_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=65, encoding="utf-8") # Consecutivo (Negrita, 65)
+        sucursal_font = ImageFont.truetype("DejaVuSans.ttf", size=28, encoding="utf-8") # Sucursales
     except IOError:
+        st.error("Error: No se encontraron los archivos de fuente (DejaVuSans.ttf o DejaVuSans-Bold.ttf). Asegúrate de que estén en la misma carpeta que app.py.")
         desc_font = exp_font = consecutive_font = sucursal_font = ImageFont.load_default()
     # --- FIN CAMBIO ---
 
@@ -171,7 +173,7 @@ def create_qr_card(
     if wrapped_validez and wrapped_restric:
         current_y += GAP_BETWEEN_BLOCKS
 
-    # Dibujar bloque de RESTRICCIONES
+    # Dibujar bloque de RESTRICIONES
     for line in wrapped_restric:
         line_width = desc_font.getlength(line)
         LINE_X_CENTERED = (CARD_WIDTH_PX / 2) - (line_width / 2)
@@ -196,8 +198,9 @@ def generate_design_template(output_filename):
     img = Image.new('RGB', (CARD_WIDTH_PX, CARD_HEIGHT_PX), (230, 230, 230)); draw = ImageDraw.Draw(img)
     # --- INICIO CAMBIO: Añadir encoding="utf-8" ---
     try:
-        title_font = ImageFont.truetype("arialbd.ttf", size=40, encoding="utf-8")
-        main_font = ImageFont.truetype("arial.ttf", size=24, encoding="utf-8")
+        # Asegúrate de haber subido 'DejaVuSans.ttf' y 'DejaVuSans-Bold.ttf'
+        title_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=40, encoding="utf-8")
+        main_font = ImageFont.truetype("DejaVuSans.ttf", size=24, encoding="utf-8")
     except IOError:
         title_font = main_font = ImageFont.load_default()
     # --- FIN CAMBIO ---
