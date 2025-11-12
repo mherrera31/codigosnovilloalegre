@@ -1,4 +1,4 @@
-# app.py (VERSIÓN CORREGIDA - Nuevo Layout con Sucursales)
+# app.py (VERSIÓN CORREGIDA - Espacios de texto ajustados)
 import streamlit as st
 import auth
 import db_service
@@ -48,17 +48,19 @@ if 'clear_form_inputs' not in st.session_state: st.session_state['clear_form_inp
 
 
 # --- FUNCIONES AUXILIARES ---
+# --- INICIO CAMBIO: La función ahora recibe las listas de texto ---
 def create_qr_card(
     data_to_encode: str, 
     output_path: str, 
-    description: str, # Texto combinado de Validez y Restricciones
+    scopes_text_list: list, # <-- CAMBIO: Lista de Validez
+    restrictions_text_list: list, # <-- CAMBIO: Lista de Restricciones
     branch_names: list, # Lista de nombres de sucursales
     expiration: str, 
     consecutive: str
 ):
+# --- FIN CAMBIO ---
     """
     Genera JPG de tarjeta 8.5x5cm con QR.
-    'description' AHORA SE REFIERE AL TEXTO COMBINADO DE VALIDEZ/RESTRICCIONES.
     """
     template_path = st.session_state.get(TEMPLATE_PATH_KEY)
     card_img = None
@@ -117,47 +119,64 @@ def create_qr_card(
     CONS_POS = (int(CONS_X_CENTERED_ON_QR), int(CONS_Y))
 
     # 5. Posición Sucursales (Centrado debajo del Consecutivo)
-    SUC_X_CENTERED_ON_QR = (QR_X + (QR_SIZE_PX / 2)) - (sucursales_width / 2)
-    # Alto del consecutivo (MÉTODO MODERNO: .getbbox())
     cons_bbox = consecutive_font.getbbox(cons_text)
     cons_height = cons_bbox[3] - cons_bbox[1]
+    SUC_X_CENTERED_ON_QR = (QR_X + (QR_SIZE_PX / 2)) - (sucursales_width / 2)
     SUC_Y = CONS_Y + cons_height + 15 # Y del consecutivo + alto + padding
     SUC_POS = (int(SUC_X_CENTERED_ON_QR), int(SUC_Y))
 
     # 6. Posición Fecha (Inferior Central, última línea)
-    EXP_X_CENTERED_ON_CARD = (CARD_WIDTH_PX / 2) - (exp_width / 2)
-    # Alto de la fuente de fecha (MÉTODO MODERNO: .getbbox())
     exp_bbox = exp_font.getbbox(exp_text)
     exp_height = exp_bbox[3] - exp_bbox[1]
+    EXP_X_CENTERED_ON_CARD = (CARD_WIDTH_PX / 2) - (exp_width / 2)
     EXP_Y_BOTTOM = CARD_HEIGHT_PX - BORDER_PX - exp_height
     EXP_POS = (int(EXP_X_CENTERED_ON_CARD), int(EXP_Y_BOTTOM))
 
-    # 7. Lógica de Text Wrap para Restricciones/Validez (description)
+    # 7. Lógica de Text Wrap para Validez/Restricciones (¡AQUÍ ESTÁ EL CAMBIO!)
     
-    WRAP_CHARS = 55 # Aumentado de 45 a 55 para líneas más anchas
+    WRAP_CHARS = 55 # Párrafo más ancho (era 45)
+    GAP_BETWEEN_BLOCKS = 20 # Espacio fijo entre bloques (era una línea entera)
     
-    wrapped_lines = []
-    # Dividir primero por la etiqueta \n que pusimos, luego wrappear cada parte
-    for part in description.split('\n'):
-        wrapped_lines.extend(textwrap.wrap(part, width=WRAP_CHARS))
-        wrapped_lines.append("") # Añadir un espacio (línea en blanco) entre bloques
+    # Preparar bloques de texto
+    validez_text = "Validez: " + ". ".join(scopes_text_list) if scopes_text_list else ""
+    restric_text = "Restricciones: " + ". ".join(restrictions_text_list) if restrictions_text_list else ""
 
-    if wrapped_lines:
-        wrapped_lines.pop() # Quitar el último espacio en blanco
-
-    # Calcular Y inicial (MÉTODO MODERNO: .getbbox())
+    wrapped_validez = textwrap.wrap(validez_text, width=WRAP_CHARS)
+    wrapped_restric = textwrap.wrap(restric_text, width=WRAP_CHARS)
+    
+    # Calcular alto de línea
     desc_bbox = desc_font.getbbox("A")
     line_height = (desc_bbox[3] - desc_bbox[1]) + 5 # Alto (bottom-top) + 5px padding
     
-    # Posicionar el bloque de texto justo arriba de la fecha
-    current_y = EXP_Y_BOTTOM - (len(wrapped_lines) * line_height) - 15 # 15px padding arriba de la fecha
+    # Calcular alto total del bloque de texto
+    total_text_height = 0
+    if wrapped_validez:
+        total_text_height += (len(wrapped_validez) * line_height)
+    if wrapped_restric:
+        total_text_height += (len(wrapped_restric) * line_height)
+    if wrapped_validez and wrapped_restric:
+        total_text_height += GAP_BETWEEN_BLOCKS # Añadir el espacio entre bloques
     
-    # Dibujar cada línea de texto (validez/restricciones)
-    for line in wrapped_lines:
+    # Calcular Y inicial (posicionarlo arriba de la fecha)
+    current_y = EXP_Y_BOTTOM - 15 - total_text_height # 15px padding arriba de la fecha
+
+    # Dibujar bloque de VALIDEZ
+    for line in wrapped_validez:
         line_width = desc_font.getlength(line)
         LINE_X_CENTERED = (CARD_WIDTH_PX / 2) - (line_width / 2)
         draw.text((int(LINE_X_CENTERED), int(current_y)), line, fill=(0,0,0), font=desc_font)
-        current_y += line_height 
+        current_y += line_height
+    
+    # Añadir el espacio si ambos bloques existen
+    if wrapped_validez and wrapped_restric:
+        current_y += GAP_BETWEEN_BLOCKS
+
+    # Dibujar bloque de RESTRICCIONES
+    for line in wrapped_restric:
+        line_width = desc_font.getlength(line)
+        LINE_X_CENTERED = (CARD_WIDTH_PX / 2) - (line_width / 2)
+        draw.text((int(LINE_X_CENTERED), int(current_y)), line, fill=(0,0,0), font=desc_font)
+        current_y += line_height
     
     # --- FIN LÓGICA DE POSICIONES ---
 
@@ -446,28 +465,20 @@ elif app_mode == "🛠️ Creador QR":
                         st.balloons()
                         generated_paths = []; coupons = result['coupon_entries']
 
-                        # --- INICIO CAMBIO: Combinar texto (con etiquetas) para la tarjeta ---
+                        # --- INICIO CAMBIO: Obtener listas de texto ---
                         scopes_text_list = st.session_state[f"{form_key}_scopes"]
                         restrictions_text_list = st.session_state[f"{form_key}_restrictions"]
-                        
-                        text_parts = []
-                        if scopes_text_list:
-                            text_parts.append("Validez: " + ". ".join(scopes_text_list))
-                        if restrictions_text_list:
-                            text_parts.append("Restricciones: " + ". ".join(restrictions_text_list))
-                        
-                        # Unir con un \n (salto de línea) para que la función create_qr_card los separe
-                        text_for_card = "\n".join(text_parts)
                         # --- FIN CAMBIO ---
 
                         for entry in coupons:
                             path = os.path.join(GENERATED_QRS_DIR, f"{entry['consecutive']:04d}.jpg")
                             
-                            # --- CAMBIO: Pasar el nuevo texto y las sucursales a la función ---
+                            # --- CAMBIO: Pasar las listas a la función ---
                             create_qr_card(
                                 entry['id'], 
                                 path, 
-                                text_for_card, # <--- Texto combinado con etiquetas
+                                scopes_text_list, # <--- Lista de Validez
+                                restrictions_text_list, # <--- Lista de Restricciones
                                 branch_names_for_card, # <--- Lista de sucursales
                                 entry['expiration_date'], 
                                 f"{entry['consecutive']:04d}"
