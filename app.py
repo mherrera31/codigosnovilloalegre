@@ -67,9 +67,9 @@ def create_qr_card(data_to_encode: str, output_path: str, description: str, expi
     
     # --- INICIO CAMBIO: Cargar 3 fuentes ---
     try:
-        desc_font = ImageFont.truetype("arial.ttf", size=36) # Restricciones
-        exp_font = ImageFont.truetype("arial.ttf", size=30)  # Fecha
-        consecutive_font = ImageFont.truetype("arialbd.ttf", size=55) # Consecutivo (Negrita, 55)
+        desc_font = ImageFont.truetype("arial.ttf", size=45) # Restricciones
+        exp_font = ImageFont.truetype("arial.ttf", size=60)  # Fecha
+        consecutive_font = ImageFont.truetype("arialbd.ttf", size=80) # Consecutivo (Negrita, 55)
     except IOError:
         desc_font = exp_font = consecutive_font = ImageFont.load_default()
     # --- FIN CAMBIO ---
