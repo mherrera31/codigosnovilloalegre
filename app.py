@@ -1,4 +1,4 @@
-# app.py (VERSIÓN CORREGIDA - Filtro de Defaults en Multiselect)
+# app.py (VERSIÓN CORREGIDA - Layout solicitado por usuario)
 import streamlit as st
 import auth
 import db_service
@@ -20,33 +20,29 @@ TEMPLATE_DIR = 'design_templates'; os.makedirs(TEMPLATE_DIR, exist_ok=True)
 GENERATED_QRS_DIR = 'generated_qrs'; os.makedirs(GENERATED_QRS_DIR, exist_ok=True)
 TEMPLATE_PATH_KEY = 'current_template_path'
 
-# --- CAMBIOS DE DIMENSIÓN (8.5cm x 5cm) ---
-CARD_WIDTH_PX = 1004 # Ajustado de 1063 (8.5cm a 300dpi)
-CARD_HEIGHT_PX = 591 # (5cm a 300dpi)
-CARD_WIDTH_MM = 85   # Ajustado de 90
+# --- TAMAÑO 8.5cm x 5cm ---
+CARD_WIDTH_PX = 1004 # 8.5cm a ~300dpi
+CARD_HEIGHT_PX = 591 # 5cm a ~300dpi
+CARD_WIDTH_MM = 85
 CARD_HEIGHT_MM = 50
-# --- FIN CAMBIOS ---
+# --- FIN TAMAÑO ---
 
 QR_SIZE_PX = 250; BORDER_PX = 50
 
 # --- Inicialización de Estado ---
-# Essential state variables
+# (El estado de la sesión no cambia)
 if 'logged_in' not in st.session_state: st.session_state['logged_in'] = False
 if 'user_role' not in st.session_state: st.session_state['user_role'] = None
 if 'username' not in st.session_state: st.session_state['username'] = 'N/A' # Default username
 if 'user_id' not in st.session_state: st.session_state['user_id'] = None
 if 'branch_id' not in st.session_state: st.session_state['branch_id'] = None
 if TEMPLATE_PATH_KEY not in st.session_state: st.session_state[TEMPLATE_PATH_KEY] = None
-# State for receipt and download display
 if 'last_receipt_data' not in st.session_state: st.session_state['last_receipt_data'] = None
 if 'show_receipt' not in st.session_state: st.session_state['show_receipt'] = False
 if 'last_zip_buffer' not in st.session_state: st.session_state['last_zip_buffer'] = None
 if 'last_zip_filename' not in st.session_state: st.session_state['last_zip_filename'] = None
-# State for selected receipt in reports
 if 'selected_receipt_id' not in st.session_state: st.session_state['selected_receipt_id'] = None
-# State for form key to allow programmatic reset
 if 'form_key_counter' not in st.session_state: st.session_state['form_key_counter'] = 0
-# State to manage clearing the form inputs
 if 'clear_form_inputs' not in st.session_state: st.session_state['clear_form_inputs'] = False
 
 
@@ -63,63 +59,72 @@ def create_qr_card(data_to_encode: str, output_path: str, description: str, expi
     except Exception as e:
         st.error(f"Err Plantilla: {e}. Fondo blanco.")
 
-    if card_img is None: # Create new image if template failed or doesn't exist
+    # Si no hay plantilla (o falla), crea fondo blanco
+    if card_img is None: 
         card_img = Image.new('RGB', (CARD_WIDTH_PX, CARD_HEIGHT_PX), (255, 255, 255))
 
     draw = ImageDraw.Draw(card_img)
-    # Dibujar elementos base si no hay plantilla efectiva
-    has_template = template_path and os.path.exists(template_path) and card_img.size == (CARD_WIDTH_PX, CARD_HEIGHT_PX) # Check again after potential resize/error
-    if not has_template:
-        draw.rectangle([0, 0, CARD_WIDTH_PX, 80], fill=(191, 2, 2))
-        try:
-            title_font = ImageFont.truetype("arialbd.ttf", size=32)
-            draw.text((30, 25), "TARJETA DE REGALO NOVILLO ALEGRE", fill=(255,255,255), font=title_font)
-        except IOError: pass # Ignorar si la fuente no está
-
-    # Cargar fuentes principales
+    
+    # --- INICIO CAMBIO: Cargar 3 fuentes ---
     try:
-        # --- CAMBIO DE TAMAÑO DE FUENTES ---
-        main_font = ImageFont.truetype("arial.ttf", size=36) # Ajustado de 30
-        consecutive_font = ImageFont.truetype("arialbd.ttf", size=48) # Ajustado de 40
+        desc_font = ImageFont.truetype("arial.ttf", size=36) # Restricciones
+        exp_font = ImageFont.truetype("arial.ttf", size=30)  # Fecha
+        consecutive_font = ImageFont.truetype("arialbd.ttf", size=55) # Consecutivo (Negrita, 55)
     except IOError:
-        main_font = consecutive_font = ImageFont.load_default()
+        desc_font = exp_font = consecutive_font = ImageFont.load_default()
+    # --- FIN CAMBIO ---
 
     # Generar QR
     qr = qrcode.QRCode(1, qrcode.constants.ERROR_CORRECT_M, 8, 2); qr.add_data(data_to_encode); qr.make(fit=True); qr_img = qr.make_image(fill_color="black", back_color="white").convert('RGB')
-    QR_X = CARD_WIDTH_PX - QR_SIZE_PX - BORDER_PX; QR_Y = 100
     
-    # --- LÓGICA DE POSICIONES (Centrado) ---
+    # --- INICIO CAMBIO: Lógica de Posiciones ---
+    
+    # 1. Textos
     desc_text = description
     exp_text = f"Válido hasta: {expiration}"
-    cons_text = f"CONSECUTIVO: {consecutive}"
+    cons_text = f"{consecutive}" # CAMBIO: Sin la palabra "CONSECUTIVO:"
     
-    # Calcular anchos
+    # 2. Calcular anchos
     try:
-        desc_width = draw.textlength(desc_text, font=main_font)
+        desc_width = draw.textlength(desc_text, font=desc_font)
+        exp_width = draw.textlength(exp_text, font=exp_font)
         cons_width = draw.textlength(cons_text, font=consecutive_font)
-    except AttributeError: # Fallback para versiones antiguas de Pillow
-        desc_width = main_font.getsize(desc_text)[0]
+    except AttributeError: # Fallback
+        desc_width = desc_font.getsize(desc_text)[0]
+        exp_width = exp_font.getsize(exp_text)[0]
         cons_width = consecutive_font.getsize(cons_text)[0]
 
-    # Calcular X centrado
-    DESC_X_CENTERED = (CARD_WIDTH_PX - desc_width) / 2
-    CONS_X_CENTERED = (CARD_WIDTH_PX - cons_width) / 2
+    # 3. Posición QR (Global, derecha, movido un poco hacia arriba)
+    QR_X = CARD_WIDTH_PX - QR_SIZE_PX - BORDER_PX
+    QR_Y = BORDER_PX + 50 
+    QR_POS = (int(QR_X), int(QR_Y))
 
-    if has_template: 
-        PROMO_POS = (DESC_X_CENTERED, 400) # Centrado
-        EXP_POS = (BORDER_PX, 440)         # Izquierda (Sin cambios)
-        CONS_POS = (CONS_X_CENTERED, 480)  # Centrado
-    else: 
-        PROMO_POS = (DESC_X_CENTERED, 150) # Centrado
-        EXP_POS = (BORDER_PX, 250)         # Izquierda (Sin cambios)
-        CONS_POS = (CONS_X_CENTERED, 480)  # Centrado
+    # 4. Posición Consecutivo (Centrado debajo del QR)
+    CONS_X_CENTERED_ON_QR = (QR_X + (QR_SIZE_PX / 2)) - (cons_width / 2)
+    CONS_Y = QR_Y + QR_SIZE_PX + 20 # 20px padding bajo el QR
+    CONS_POS = (int(CONS_X_CENTERED_ON_QR), int(CONS_Y))
+
+    # 5. Posición Restricciones (Inferior Central, Línea 1)
+    DESC_X_CENTERED_ON_CARD = (CARD_WIDTH_PX / 2) - (desc_width / 2)
+    DESC_Y_BOTTOM = CARD_HEIGHT_PX - BORDER_PX - 40 - 45 # Base - Borde - AltoFecha - Padding
+    PROMO_POS = (int(DESC_X_CENTERED_ON_CARD), int(DESC_Y_BOTTOM))
     
-    draw.text(PROMO_POS, desc_text, fill=(0,0,0), font=main_font)
-    draw.text(EXP_POS, exp_text, fill=(100,100,100), font=main_font)
-    draw.text(CONS_POS, cons_text, fill=(0,0,0), font=consecutive_font)
+    # 6. Posición Fecha (Inferior Central, Línea 2)
+    EXP_X_CENTERED_ON_CARD = (CARD_WIDTH_PX / 2) - (exp_width / 2)
+    EXP_Y_BOTTOM = CARD_HEIGHT_PX - BORDER_PX - 40 # Base - Borde - AltoFecha
+    EXP_POS = (int(EXP_X_CENTERED_ON_CARD), int(EXP_Y_BOTTOM))
+
     # --- FIN LÓGICA DE POSICIONES ---
 
-    qr_scaled = qr_img.resize((QR_SIZE_PX, QR_SIZE_PX)); card_img.paste(qr_scaled, (QR_X, QR_Y))
+    # Dibujar Textos
+    draw.text(PROMO_POS, desc_text, fill=(0,0,0), font=desc_font)
+    draw.text(CONS_POS, cons_text, fill=(0,0,0), font=consecutive_font)
+    draw.text(EXP_POS, exp_text, fill=(100,100,100), font=exp_font)
+    
+    # Pegar QR
+    qr_scaled = qr_img.resize((QR_SIZE_PX, QR_SIZE_PX))
+    card_img.paste(qr_scaled, QR_POS)
+
     card_img.save(output_path, "JPEG", quality=95); return output_path
 
 def generate_design_template(output_filename):
