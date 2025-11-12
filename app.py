@@ -81,10 +81,10 @@ def create_qr_card(
     # --- INICIO CAMBIO: Cargar 4 fuentes locales (DejaVuSans) con encoding="utf-8" ---
     try:
         # Asegúrate de haber subido 'DejaVuSans.ttf' y 'DejaVuSans-Bold.ttf'
-        desc_font = ImageFont.truetype("DejaVuSans.ttf", size=36, encoding="utf-8") # Validez/Restricciones
-        exp_font = ImageFont.truetype("DejaVuSans.ttf", size=30, encoding="utf-8")  # Fecha
-        consecutive_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=65, encoding="utf-8") # Consecutivo (Negrita, 65)
-        sucursal_font = ImageFont.truetype("DejaVuSans.ttf", size=28, encoding="utf-8") # Sucursales
+        desc_font = ImageFont.truetype("DejaVuSans.ttf", size=12, encoding="utf-8") # Validez/Restricciones
+        exp_font = ImageFont.truetype("DejaVuSans.ttf", size=12, encoding="utf-8")  # Fecha
+        consecutive_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=25, encoding="utf-8") # Consecutivo (Negrita, 65)
+        sucursal_font = ImageFont.truetype("DejaVuSans.ttf", size=15, encoding="utf-8") # Sucursales
     except IOError:
         st.error("Error: No se encontraron los archivos de fuente (DejaVuSans.ttf o DejaVuSans-Bold.ttf). Asegúrate de que estén en la misma carpeta que app.py.")
         desc_font = exp_font = consecutive_font = sucursal_font = ImageFont.load_default()
