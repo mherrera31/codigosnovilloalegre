@@ -616,7 +616,7 @@ elif app_mode == "🛠️ Creador QR":
         with st.form("template_form", clear_on_submit=True):
             template_name = st.text_input("Nombre de la Plantilla (ej: Navidad2025, DiaPadre)")
             up_file = st.file_uploader(f"Suba PNG ({CARD_WIDTH_PX}x{CARD_HEIGHT_PX}px, Horizontal)", type="png")
-            submitted = st.form_submit_button("Guardar Plantilla en Supabase")
+            submitted = st.form_submit_button("Guardar Plantilla")
             
             if submitted:
                 if not template_name:
