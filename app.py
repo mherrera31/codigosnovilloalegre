@@ -1,4 +1,4 @@
-# app.py (VERSIÓN CORREGIDA - Usa getlength/getbbox)
+# app.py (VERSIÓN CORREGIDA - Nuevo Layout con Sucursales)
 import streamlit as st
 import auth
 import db_service
@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 import pandas as pd
 import zipfile
 import io
-import textwrap 
+import textwrap # <-- IMPORTANTE: Añadir esta librería
 
 # --- CONFIGURACIÓN Y CONSTANTES ---
 st.set_page_config(page_title="Sistema QR Novillo Alegre", layout="wide")
@@ -48,7 +48,14 @@ if 'clear_form_inputs' not in st.session_state: st.session_state['clear_form_inp
 
 
 # --- FUNCIONES AUXILIARES ---
-def create_qr_card(data_to_encode: str, output_path: str, description: str, expiration: str, consecutive: str):
+def create_qr_card(
+    data_to_encode: str, 
+    output_path: str, 
+    description: str, # Texto combinado de Validez y Restricciones
+    branch_names: list, # Lista de nombres de sucursales
+    expiration: str, 
+    consecutive: str
+):
     """
     Genera JPG de tarjeta 8.5x5cm con QR.
     'description' AHORA SE REFIERE AL TEXTO COMBINADO DE VALIDEZ/RESTRICCIONES.
@@ -69,23 +76,31 @@ def create_qr_card(data_to_encode: str, output_path: str, description: str, expi
 
     draw = ImageDraw.Draw(card_img)
     
-    # Cargar 3 fuentes (CON TUS TAMAÑOS)
+    # --- INICIO CAMBIO: Cargar 4 fuentes ---
     try:
-        desc_font = ImageFont.truetype("arial.ttf", size=55) # Restricciones (Tu tamaño 55)
-        exp_font = ImageFont.truetype("arial.ttf", size=90)  # Fecha (Tu tamaño 90)
-        consecutive_font = ImageFont.truetype("arialbd.ttf", size=100) # Consecutivo (Tu tamaño 100)
+        desc_font = ImageFont.truetype("arial.ttf", size=36) # Validez/Restricciones
+        exp_font = ImageFont.truetype("arial.ttf", size=30)  # Fecha
+        consecutive_font = ImageFont.truetype("arialbd.ttf", size=65) # Consecutivo (Negrita, 65)
+        sucursal_font = ImageFont.truetype("arial.ttf", size=28) # Sucursales
     except IOError:
-        desc_font = exp_font = consecutive_font = ImageFont.load_default()
+        desc_font = exp_font = consecutive_font = sucursal_font = ImageFont.load_default()
+    # --- FIN CAMBIO ---
 
     # Generar QR
     qr = qrcode.QRCode(1, qrcode.constants.ERROR_CORRECT_M, 8, 2); qr.add_data(data_to_encode); qr.make(fit=True); qr_img = qr.make_image(fill_color="black", back_color="white").convert('RGB')
     
-    # --- INICIO CORRECCIÓN DE ERROR: Lógica de Posiciones ---
+    # --- INICIO CAMBIO: Lógica de Posiciones y Text Wrap ---
     
     # 1. Textos
     exp_text = f"Válido hasta: {expiration}"
     cons_text = f"{consecutive}" # Sin la palabra "CONSECUTIVO:"
-    
+
+    # Texto de Sucursales
+    if not branch_names: # Si la lista está vacía (significa "Todas")
+        sucursales_text = "Válido en todas las sucursales"
+    else:
+        sucursales_text = "Sucursales: " + ", ".join(branch_names)
+
     # 2. Posición QR (Global, derecha, movido un poco hacia arriba)
     QR_X = CARD_WIDTH_PX - QR_SIZE_PX - BORDER_PX
     QR_Y = BORDER_PX + 50 
@@ -94,44 +109,61 @@ def create_qr_card(data_to_encode: str, output_path: str, description: str, expi
     # 3. Calcular anchos (MÉTODO MODERNO: .getlength())
     exp_width = exp_font.getlength(exp_text)
     cons_width = consecutive_font.getlength(cons_text)
+    sucursales_width = sucursal_font.getlength(sucursales_text)
 
     # 4. Posición Consecutivo (Centrado debajo del QR)
     CONS_X_CENTERED_ON_QR = (QR_X + (QR_SIZE_PX / 2)) - (cons_width / 2)
     CONS_Y = QR_Y + QR_SIZE_PX + 20 # 20px padding bajo el QR
     CONS_POS = (int(CONS_X_CENTERED_ON_QR), int(CONS_Y))
 
-    # 5. Posición Fecha (Inferior Central, última línea)
+    # 5. Posición Sucursales (Centrado debajo del Consecutivo)
+    SUC_X_CENTERED_ON_QR = (QR_X + (QR_SIZE_PX / 2)) - (sucursales_width / 2)
+    # Alto del consecutivo (MÉTODO MODERNO: .getbbox())
+    cons_bbox = consecutive_font.getbbox(cons_text)
+    cons_height = cons_bbox[3] - cons_bbox[1]
+    SUC_Y = CONS_Y + cons_height + 15 # Y del consecutivo + alto + padding
+    SUC_POS = (int(SUC_X_CENTERED_ON_QR), int(SUC_Y))
+
+    # 6. Posición Fecha (Inferior Central, última línea)
     EXP_X_CENTERED_ON_CARD = (CARD_WIDTH_PX / 2) - (exp_width / 2)
     # Alto de la fuente de fecha (MÉTODO MODERNO: .getbbox())
-    exp_bbox = exp_font.getbbox("A")
+    exp_bbox = exp_font.getbbox(exp_text)
     exp_height = exp_bbox[3] - exp_bbox[1]
     EXP_Y_BOTTOM = CARD_HEIGHT_PX - BORDER_PX - exp_height
     EXP_POS = (int(EXP_X_CENTERED_ON_CARD), int(EXP_Y_BOTTOM))
 
-    # 6. Lógica de Text Wrap para Restricciones/Validez (description)
+    # 7. Lógica de Text Wrap para Restricciones/Validez (description)
     
-    WRAP_CHARS = 45 # Mantener 45 caracteres de ancho
-    wrapped_lines = textwrap.wrap(description, width=WRAP_CHARS)
+    WRAP_CHARS = 55 # Aumentado de 45 a 55 para líneas más anchas
     
+    wrapped_lines = []
+    # Dividir primero por la etiqueta \n que pusimos, luego wrappear cada parte
+    for part in description.split('\n'):
+        wrapped_lines.extend(textwrap.wrap(part, width=WRAP_CHARS))
+        wrapped_lines.append("") # Añadir un espacio (línea en blanco) entre bloques
+
+    if wrapped_lines:
+        wrapped_lines.pop() # Quitar el último espacio en blanco
+
     # Calcular Y inicial (MÉTODO MODERNO: .getbbox())
-    # Esta fue la línea que dio el error (usaba .getsize())
     desc_bbox = desc_font.getbbox("A")
     line_height = (desc_bbox[3] - desc_bbox[1]) + 5 # Alto (bottom-top) + 5px padding
     
-    current_y = EXP_Y_BOTTOM - (len(wrapped_lines) * line_height) - 10 
+    # Posicionar el bloque de texto justo arriba de la fecha
+    current_y = EXP_Y_BOTTOM - (len(wrapped_lines) * line_height) - 15 # 15px padding arriba de la fecha
     
-    # Dibujar cada línea de texto (restricciones)
+    # Dibujar cada línea de texto (validez/restricciones)
     for line in wrapped_lines:
         line_width = desc_font.getlength(line)
-        
         LINE_X_CENTERED = (CARD_WIDTH_PX / 2) - (line_width / 2)
         draw.text((int(LINE_X_CENTERED), int(current_y)), line, fill=(0,0,0), font=desc_font)
         current_y += line_height 
     
-    # --- FIN CORRECCIÓN DE ERROR ---
+    # --- FIN LÓGICA DE POSICIONES ---
 
-    # Dibujar Textos (Consecutivo y Fecha)
+    # Dibujar Textos (Consecutivo, Sucursales y Fecha)
     draw.text(CONS_POS, cons_text, fill=(0,0,0), font=consecutive_font)
+    draw.text(SUC_POS, sucursales_text, fill=(80,80,80), font=sucursal_font) # Color gris
     draw.text(EXP_POS, exp_text, fill=(100,100,100), font=exp_font)
     
     # Pegar QR
@@ -187,7 +219,7 @@ if 'logged_in' not in st.session_state: st.session_state['logged_in'] = False
 if not auth.is_authenticated():
     st.image(LOGO_URL, width=300); st.title("QR-Creator"); auth.login_ui(); st.stop()
 
-# --- BARRA LATERAL Y NAVEGACIÓN ---
+# --- BARRA LATERAL Y NAVEGÁCIÓ ---
 st.image(LOGO_URL, width=300); st.title("QR-Creator")
 user = auth.get_current_user(); user_role = auth.get_user_role()
 with st.sidebar:
@@ -283,7 +315,7 @@ elif app_mode == "🛠️ Creador QR":
                 default_branches_raw = [] if st.session_state.get('clear_form_inputs') else st.session_state.get(f"{form_key}_branches", [])
                 default_branches = [b for b in default_branches_raw if b in branch_options] # Filter invalid options
                 allowed_branches = st.multiselect(
-                    "Sucursales Permitidas (Obligatorio si 'Todas' no está marcado)",
+                    "Sucursales Permitidas (Aparecerá en la tarjeta)", # Texto cambiado
                     options=branch_options, default=default_branches, key=f"{form_key}_branches", disabled=all_branches_selected
                  )
 
@@ -379,26 +411,34 @@ elif app_mode == "🛠️ Creador QR":
                 if not type_val or type_val == "-- Seleccione Tipo --": st.error("❌ Seleccione Tipo."); error = True
                 if count_val is None or count_val <= 0: st.error("❌ Cantidad > 0."); error = True
                 if months_val is None: st.error("❌ Seleccione Meses."); error=True
-                if not all_branches_val and not branches_val: st.error("❌ Seleccione Sucursales o marque 'Todas'."); error = True
                 
-                # --- CAMBIO: Validez y Restricciones ahora no son obligatorias en el form, ---
-                # pero las leeremos para la tarjeta. Si están vacías, no pasa nada.
-                # if not scopes_val: st.error("❌ Seleccione Validez."); error = True
-                # if not restrictions_val: st.error("❌ Seleccione Restricciones."); error = True
+                # --- CAMBIO: La única validación de sucursales es que O marque "Todas" O seleccione al menos una
+                if not all_branches_val and not branches_val: 
+                    st.error("❌ Seleccione Sucursales o marque 'Todas'."); error = True
+                
 
                 if not error:
                     type_id = type_options.get(type_val)
                     user_id = st.session_state.get('user_id')
                     scope_ids = [scope_options[n] for n in scopes_val]
                     restriction_ids = [restriction_options[n] for n in restrictions_val]
-                    branch_names_to_send = branches_val if not all_branches_val else []
+                    
+                    # --- CAMBIO: Preparar lista de sucursales para la BBDD Y para la tarjeta
+                    branch_names_for_db = [] # Vacía si son todas
+                    branch_names_for_card = [] # Vacía si son todas
+                    if not all_branches_val:
+                        branch_names_for_db = branches_val # Nombres para la BBDD
+                        branch_names_for_card = branches_val # Nombres para la Tarjeta
+                    # --- FIN CAMBIO ---
+
                     selected_promo_data = promo_options.get(promo_val, {})
 
                     st.info(f"⚙️ Generando {count_val} tarjeta(s)... Por favor espere.")
                     result = db_service.create_coupon_batch(
                         count=count_val, asociado_comprador=asoc_val,
                         promo_data=selected_promo_data, value_crc=vcrc_val, value_usd=vusd_val,
-                        type_id=type_id, months_valid=months_val, branch_names=branch_names_to_send,
+                        type_id=type_id, months_valid=months_val, 
+                        branch_names=branch_names_for_db, # Enviar la lista de nombres a la BBDD
                         scope_ids=scope_ids, restriction_ids=restriction_ids, user_id=user_id
                     )
                     if result and result.get('coupon_entries'):
@@ -406,27 +446,29 @@ elif app_mode == "🛠️ Creador QR":
                         st.balloons()
                         generated_paths = []; coupons = result['coupon_entries']
 
-                        # --- INICIO CAMBIO: Combinar texto para la tarjeta ---
-                        # Obtener las listas de texto de Validez y Restricciones del formulario
+                        # --- INICIO CAMBIO: Combinar texto (con etiquetas) para la tarjeta ---
                         scopes_text_list = st.session_state[f"{form_key}_scopes"]
                         restrictions_text_list = st.session_state[f"{form_key}_restrictions"]
                         
-                        all_conditions = scopes_text_list + restrictions_text_list
+                        text_parts = []
+                        if scopes_text_list:
+                            text_parts.append("Validez: " + ". ".join(scopes_text_list))
+                        if restrictions_text_list:
+                            text_parts.append("Restricciones: " + ". ".join(restrictions_text_list))
                         
-                        if not all_conditions:
-                            text_for_card = "" # Dejar vacío si no se selecciona nada
-                        else:
-                            text_for_card = ". ".join(all_conditions)
+                        # Unir con un \n (salto de línea) para que la función create_qr_card los separe
+                        text_for_card = "\n".join(text_parts)
                         # --- FIN CAMBIO ---
 
                         for entry in coupons:
                             path = os.path.join(GENERATED_QRS_DIR, f"{entry['consecutive']:04d}.jpg")
                             
-                            # --- CAMBIO: Pasar el nuevo texto a la función ---
+                            # --- CAMBIO: Pasar el nuevo texto y las sucursales a la función ---
                             create_qr_card(
                                 entry['id'], 
                                 path, 
-                                text_for_card, # <--- Texto combinado
+                                text_for_card, # <--- Texto combinado con etiquetas
+                                branch_names_for_card, # <--- Lista de sucursales
                                 entry['expiration_date'], 
                                 f"{entry['consecutive']:04d}"
                             )
