@@ -1,4 +1,4 @@
-# app.py (VERSIÓN CORREGIDA - Vista Previa con Botón)
+# app.py (VERSIÓN CORREGIDA - Vista Previa FUERA del formulario)
 import streamlit as st
 import auth
 import db_service
@@ -60,9 +60,7 @@ if 'last_zip_filename' not in st.session_state: st.session_state['last_zip_filen
 if 'selected_receipt_id' not in st.session_state: st.session_state['selected_receipt_id'] = None
 if 'form_key_counter' not in st.session_state: st.session_state['form_key_counter'] = 0
 if 'clear_form_inputs' not in st.session_state: st.session_state['clear_form_inputs'] = False
-# --- INICIO CAMBIO: Nuevo estado para la vista previa ---
 if 'show_preview' not in st.session_state: st.session_state['show_preview'] = False
-# --- FIN CAMBIO ---
 
 # --- CAMBIO: Obtener lista de plantillas desde Supabase Storage ---
 @st.cache_data(ttl=60) # Cache por 60 segundos
@@ -96,9 +94,7 @@ def create_qr_card(
     card_img = None
     try:
         if template_name:
-            # Descargar los bytes del archivo desde el bucket
             file_bytes = supabase_client.storage.from_(BUCKET_NAME).download(f"{template_name}.png")
-            # Abrir los bytes en memoria
             card_img = Image.open(io.BytesIO(file_bytes)).convert('RGB')
             if card_img.size != (CARD_WIDTH_PX, CARD_HEIGHT_PX):
                 card_img = card_img.resize((CARD_WIDTH_PX, CARD_HEIGHT_PX))
@@ -106,13 +102,11 @@ def create_qr_card(
         st.error(f"Error al cargar plantilla '{template_name}': {e}. Usando fondo blanco.")
         card_img = None 
 
-    # Si no hay plantilla (o falla), crea fondo blanco
     if card_img is None: 
         card_img = Image.new('RGB', (CARD_WIDTH_PX, CARD_HEIGHT_PX), (255, 255, 255))
 
     draw = ImageDraw.Draw(card_img)
     
-    # Cargar 4 fuentes locales (DejaVuSans) con encoding="utf-8"
     try:
         desc_font = ImageFont.truetype("DejaVuSans.ttf", size=36, encoding="utf-8") 
         exp_font = ImageFont.truetype("DejaVuSans.ttf", size=30, encoding="utf-8")  
@@ -122,16 +116,11 @@ def create_qr_card(
         st.error("Error: No se encontraron los archivos de fuente (DejaVuSans.ttf o DejaVuSans-Bold.ttf). Asegúrate de que estén en la misma carpeta que app.py.")
         desc_font = exp_font = consecutive_font = sucursal_font = ImageFont.load_default()
 
-    # Generar QR
     qr = qrcode.QRCode(1, qrcode.constants.ERROR_CORRECT_M, 8, 2); qr.add_data(data_to_encode); qr.make(fit=True); qr_img = qr.make_image(fill_color="black", back_color="white").convert('RGB')
-    
-    # Lógica de Posiciones y Text Wrap
     
     # 1. Textos
     exp_text = f"Válido hasta: {expiration}"
     cons_text = f"{consecutive}" 
-
-    # Texto de Sucursales
     if not branch_names: 
         sucursales_text = "Válido en todas las sucursales"
     else:
@@ -204,12 +193,10 @@ def create_qr_card(
         draw.text((int(LINE_X_CENTERED), int(current_y)), line, fill=(0,0,0), font=desc_font)
         current_y += line_height
     
-    # Dibujar Textos (Consecutivo, Sucursales y Fecha)
     draw.text(CONS_POS, cons_text, fill=(0,0,0), font=consecutive_font)
     draw.text(SUC_POS, sucursales_text, fill=(80,80,80), font=sucursal_font) 
     draw.text(EXP_POS, exp_text, fill=(100,100,100), font=exp_font)
     
-    # Pegar QR
     qr_scaled = qr_img.resize((QR_SIZE_PX, QR_SIZE_PX))
     card_img.paste(qr_scaled, QR_POS)
 
@@ -317,7 +304,7 @@ elif app_mode == "🛠️ Creador QR":
         # --- Form Handling ---
         if 'form_key_counter' not in st.session_state: st.session_state['form_key_counter'] = 0
         form_key = f"qr_creator_form_{st.session_state['form_key_counter']}"
-
+        
         # --- Form Definition ---
         with st.form(form_key, clear_on_submit=False):
             st.subheader("Configuración del Lote")
@@ -326,7 +313,6 @@ elif app_mode == "🛠️ Creador QR":
             scope_list = sorted(list(scope_options.keys()))
             restriction_list = sorted(list(restriction_options.keys()))
             
-            # Selector de Plantilla (usa Supabase)
             template_list = ["Fondo Blanco"] + get_template_list() 
             default_template_index = 0
             current_template_sel = st.session_state.get(f"{form_key}_template")
@@ -341,7 +327,6 @@ elif app_mode == "🛠️ Creador QR":
             )
             st.markdown("---")
 
-            # Inputs
             default_asoc = "" if st.session_state.get('clear_form_inputs') else st.session_state.get(f"{form_key}_asoc", "")
             input_asociado = st.text_input("**2. Asociado o Comprador (*Obligatorio*)**", value=default_asoc, key=f"{form_key}_asoc")
 
@@ -390,7 +375,7 @@ elif app_mode == "🛠️ Creador QR":
                 default_count = None if st.session_state.get('clear_form_inputs') else st.session_state.get(f'{form_key}_count')
                 count = st.number_input("Cantidad (*Obligatorio*)", min_value=1, max_value=1000, value=default_count, placeholder="1", key=f'{form_key}_count')
 
-            # --- Live Calculation Display (Inside Form, Before Submit) ---
+            # --- Live Calculation Display ---
             st.divider()
             st.subheader("Cálculo Estimado")
             
@@ -405,7 +390,6 @@ elif app_mode == "🛠️ Creador QR":
                     isinstance(live_vusd_calc, (int, float)) and live_vusd_calc >= 0 and
                     isinstance(live_count_calc, int) and live_count_calc > 0):
 
-                # (cálculos... sin cambios)
                 disc_crc_calc = db_service.calculate_discount_per_coupon(live_vcrc_calc, live_promo_data_calc)
                 disc_usd_calc = db_service.calculate_discount_per_coupon(live_vusd_calc, live_promo_data_calc)
                 sale_crc_individual = round(live_vcrc_calc - disc_crc_calc, 2)
@@ -440,59 +424,6 @@ elif app_mode == "🛠️ Creador QR":
                     st.metric(label="Valor Total Pagado (USD)", value=f"$ {total_sale_usd_calc:,.2f}")
             else:
                  st.caption("ℹ️ Llene todos los campos (*) para ver el cálculo.")
-            
-            # --- INICIO CAMBIO: Vista Previa con Botón ---
-            st.divider()
-            st.subheader("Vista Previa")
-            
-            # 1. El Botón
-            if st.button("Ver Vista Previa", key=f"{form_key}_preview_btn"):
-                st.session_state['show_preview'] = True
-            
-            # 2. El Contenedor de la Vista Previa
-            if st.session_state.get('show_preview', False):
-                with st.container(border=True): 
-                    try:
-                        # Leer valores en vivo del st.session_state
-                        live_template_name_str = st.session_state.get(f"{form_key}_template", "Fondo Blanco")
-                        live_scopes = st.session_state.get(f"{form_key}_scopes", [])
-                        live_restric = st.session_state.get(f"{form_key}_restrictions", [])
-                        live_branches = st.session_state.get(f"{form_key}_branches", [])
-                        live_all_branches = st.session_state.get(f"{form_key}_all_branches", False)
-                        live_months = st.session_state.get(f"{form_key}_months", 3)
-
-                        template_name_for_preview = None
-                        if live_template_name_str != "Fondo Blanco":
-                            template_name_for_preview = live_template_name_str 
-                        
-                        live_branch_list = []
-                        if not live_all_branches:
-                            live_branch_list = live_branches
-
-                        preview_path = os.path.join(GENERATED_QRS_DIR, "preview.jpg")
-                        
-                        create_qr_card(
-                            "PREVIEW-ID-12345678",
-                            template_name_for_preview, 
-                            preview_path,
-                            live_scopes,
-                            live_restric,
-                            live_branch_list,
-                            (datetime.now() + timedelta(days=live_months * 30)).strftime("%Y-%m-%d"),
-                            "0000"
-                        )
-                        st.image(preview_path, caption="Vista previa generada con datos de ejemplo.")
-                        
-                        # 3. Botón para ocultar
-                        if st.button("Ocultar Vista Previa", key=f"{form_key}_hide_preview"):
-                            st.session_state['show_preview'] = False
-                            st.rerun() 
-                    
-                    except Exception as e:
-                        st.error(f"No se pudo generar la vista previa: {e}")
-            else:
-                st.caption("Presione 'Ver Vista Previa' para previsualizar la tarjeta con los datos actuales.")
-            # --- FIN CAMBIO: Vista Previa con Botón ---
 
             st.divider()
 
@@ -500,12 +431,10 @@ elif app_mode == "🛠️ Creador QR":
             submitted = st.form_submit_button("✔️ Generar Lote")
 
             if submitted:
-                # Ocultar la vista previa al generar
                 st.session_state['show_preview'] = False
                 
                 # --- VALIDACIÓN FINAL ---
                 error = False
-                # Re-fetch final values from state at submission time
                 asoc_val = st.session_state[f"{form_key}_asoc"]
                 promo_val = st.session_state[f"{form_key}_promo"]
                 vcrc_val = st.session_state[f"{form_key}_vcrc"]
@@ -564,25 +493,29 @@ elif app_mode == "🛠️ Creador QR":
                         scopes_text_list = st.session_state[f"{form_key}_scopes"]
                         restrictions_text_list = st.session_state[f"{form_key}_restrictions"]
 
-                        for entry in coupons:
-                            path = os.path.join(GENERATED_QRS_DIR, f"{entry['consecutive']:04d}.jpg")
+                        with st.spinner("Creando archivos ZIP..."):
+                            zip_buffer = io.BytesIO()
+                            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+                                for entry in coupons:
+                                    # Crear archivo en carpeta temporal local
+                                    path = os.path.join(GENERATED_QRS_DIR, f"{entry['consecutive']:04d}.jpg")
+                                    
+                                    create_qr_card(
+                                        entry['id'], 
+                                        template_name_for_submit, 
+                                        path, 
+                                        scopes_text_list, 
+                                        restrictions_text_list, 
+                                        branch_names_for_card, 
+                                        entry['expiration_date'], 
+                                        f"{entry['consecutive']:04d}"
+                                    )
+                                    # Añadir al zip desde la carpeta local
+                                    zf.write(path, os.path.basename(path))
+                                    generated_paths.append(path) # (Opcional, para limpieza)
                             
-                            create_qr_card(
-                                entry['id'], 
-                                template_name_for_submit, 
-                                path, 
-                                scopes_text_list, 
-                                restrictions_text_list, 
-                                branch_names_for_card, 
-                                entry['expiration_date'], 
-                                f"{entry['consecutive']:04d}"
-                            )
-
-                            generated_paths.append(path)
-                        zip_buffer = io.BytesIO()
-                        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
-                            for p in generated_paths: zf.write(p, os.path.basename(p))
-                        zip_buffer.seek(0)
+                            zip_buffer.seek(0)
+                        
                         zip_filename = f"lote_{coupons[0]['batch_id']}.zip"
                         
                         st.session_state['last_receipt_data'] = result.get('receipt_data')
@@ -599,6 +532,61 @@ elif app_mode == "🛠️ Creador QR":
                         st.session_state['clear_form_inputs'] = False 
                 else:
                     st.session_state['clear_form_inputs'] = False
+        
+        # --- FIN DEL st.form ---
+        
+        # --- INICIO CAMBIO: Vista Previa (FUERA del form) ---
+        st.divider()
+        st.subheader("Vista Previa")
+        
+        # 1. El Botón
+        if st.button("Ver/Actualizar Vista Previa", key=f"{form_key}_preview_btn"):
+            st.session_state['show_preview'] = True
+        
+        # 2. El Contenedor de la Vista Previa
+        if st.session_state.get('show_preview', False):
+            with st.container(border=True): 
+                try:
+                    # Leer valores en vivo del st.session_state
+                    live_template_name_str = st.session_state.get(f"{form_key}_template", "Fondo Blanco")
+                    live_scopes = st.session_state.get(f"{form_key}_scopes", [])
+                    live_restric = st.session_state.get(f"{form_key}_restrictions", [])
+                    live_branches = st.session_state.get(f"{form_key}_branches", [])
+                    live_all_branches = st.session_state.get(f"{form_key}_all_branches", False)
+                    live_months = st.session_state.get(f"{form_key}_months", 3)
+
+                    template_name_for_preview = None
+                    if live_template_name_str != "Fondo Blanco":
+                        template_name_for_preview = live_template_name_str 
+                    
+                    live_branch_list = []
+                    if not live_all_branches:
+                        live_branch_list = live_branches
+
+                    preview_path = os.path.join(GENERATED_QRS_DIR, "preview.jpg")
+                    
+                    create_qr_card(
+                        "PREVIEW-ID-12345678",
+                        template_name_for_preview, 
+                        preview_path,
+                        live_scopes,
+                        live_restric,
+                        live_branch_list,
+                        (datetime.now() + timedelta(days=live_months * 30)).strftime("%Y-%m-%d"),
+                        "0000"
+                    )
+                    st.image(preview_path, caption="Vista previa generada con los datos actuales del formulario.")
+                    
+                    # 3. Botón para ocultar
+                    if st.button("Ocultar Vista Previa", key=f"{form_key}_hide_preview"):
+                        st.session_state['show_preview'] = False
+                        st.rerun() 
+                
+                except Exception as e:
+                    st.error(f"No se pudo generar la vista previa: {e}")
+        else:
+            st.caption("Presione 'Ver/Actualizar Vista Previa' para previsualizar la tarjeta con los datos del formulario.")
+        # --- FIN CAMBIO: Vista Previa (FUERA del form) ---
 
 
         # --- Display Receipt and Download (Outside Form) ---
@@ -618,7 +606,7 @@ elif app_mode == "🛠️ Creador QR":
                 st.session_state['last_zip_buffer'] = None; st.session_state['last_zip_filename'] = None
                 st.session_state['clear_form_inputs'] = True 
                 st.session_state['form_key_counter'] += 1
-                st.session_state['show_preview'] = False # <-- CAMBIO: Ocultar preview
+                st.session_state['show_preview'] = False 
                 st.rerun()
 
         if 'clear_form_inputs' in st.session_state:
@@ -643,18 +631,15 @@ elif app_mode == "🛠️ Creador QR":
                 else:
                     save_name = f"{template_name}.png"
                     
-                    # Verificar si ya existe en Supabase
                     existing_templates = get_template_list()
                     if template_name in existing_templates:
                         st.error(f"Ya existe una plantilla con el nombre '{template_name}'. Use otro nombre.")
                     else:
                         try:
-                            # Validar dimensiones
                             img = Image.open(up_file)
                             if img.size != (CARD_WIDTH_PX, CARD_HEIGHT_PX):
                                 st.error(f"Error: La imagen debe ser de {CARD_WIDTH_PX}x{CARD_HEIGHT_PX} píxeles. La subida es de {img.size[0]}x{img.size[1]}px.")
                             else:
-                                # Subir a Supabase Storage
                                 file_bytes = up_file.getbuffer()
                                 supabase_client.storage.from_(BUCKET_NAME).upload(
                                     file_path=save_name,
@@ -662,7 +647,7 @@ elif app_mode == "🛠️ Creador QR":
                                     file_options={"content-type": "image/png"}
                                 )
                                 st.success(f"Plantilla '{template_name}' guardada en el bucket.")
-                                st.cache_data.clear() # Limpiar el cache de get_template_list
+                                st.cache_data.clear() 
                                 st.rerun()
                         except Exception as e:
                             st.error(f"Error al guardar en Supabase: {e}")
@@ -678,7 +663,6 @@ elif app_mode == "🛠️ Creador QR":
                 with st.container(border=True):
                     st.markdown(f"**Nombre:** `{t_name}`")
                     
-                    # Obtener URL pública para st.image
                     try:
                         public_url = supabase_client.storage.from_(BUCKET_NAME).get_public_url(f"{t_name}.png")
                         st.image(public_url, width=400, caption=f"Vista previa de {t_name}")
@@ -687,7 +671,6 @@ elif app_mode == "🛠️ Creador QR":
                     
                     if st.button("Eliminar Plantilla", key=f"delete_{t_name}", type="primary"):
                         try:
-                            # Borrar de Supabase
                             supabase_client.storage.from_(BUCKET_NAME).remove([f"{t_name}.png"])
                             st.success(f"Plantilla '{t_name}' eliminada del bucket.")
                             st.cache_data.clear()
@@ -698,7 +681,6 @@ elif app_mode == "🛠️ Creador QR":
         st.divider()
         st.subheader("3. Guía de Diseño (JPG)")
         st.markdown(f"Guía horizontal ({CARD_WIDTH_PX}x{CARD_HEIGHT_PX} px).")
-        # La guía se sigue generando localmente solo para la descarga
         BLANK_JPG_GUIDE = os.path.join(TEMPLATE_DIR, "plantilla_guia.jpg")
         if st.button("Generar/Descargar Guía JPG", key="dl_guide"):
             generate_design_template(BLANK_JPG_GUIDE);
