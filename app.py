@@ -1,4 +1,4 @@
-# app.py (VERSIÓN CORREGIDA - Espacios de texto ajustados)
+# app.py (VERSIÓN CORREGIDA - Añadido encoding="utf-8" para tildes/ñ)
 import streamlit as st
 import auth
 import db_service
@@ -78,12 +78,12 @@ def create_qr_card(
 
     draw = ImageDraw.Draw(card_img)
     
-    # --- INICIO CAMBIO: Cargar 4 fuentes ---
+    # --- INICIO CAMBIO: Cargar 4 fuentes con encoding="utf-8" ---
     try:
-        desc_font = ImageFont.truetype("arial.ttf", size=36) # Validez/Restricciones
-        exp_font = ImageFont.truetype("arial.ttf", size=30)  # Fecha
-        consecutive_font = ImageFont.truetype("arialbd.ttf", size=65) # Consecutivo (Negrita, 65)
-        sucursal_font = ImageFont.truetype("arial.ttf", size=28) # Sucursales
+        desc_font = ImageFont.truetype("arial.ttf", size=36, encoding="utf-8") # Validez/Restricciones
+        exp_font = ImageFont.truetype("arial.ttf", size=30, encoding="utf-8")  # Fecha
+        consecutive_font = ImageFont.truetype("arialbd.ttf", size=65, encoding="utf-8") # Consecutivo (Negrita, 65)
+        sucursal_font = ImageFont.truetype("arial.ttf", size=28, encoding="utf-8") # Sucursales
     except IOError:
         desc_font = exp_font = consecutive_font = sucursal_font = ImageFont.load_default()
     # --- FIN CAMBIO ---
@@ -194,8 +194,13 @@ def create_qr_card(
 def generate_design_template(output_filename):
     """Genera guía JPG 8.5x5cm."""
     img = Image.new('RGB', (CARD_WIDTH_PX, CARD_HEIGHT_PX), (230, 230, 230)); draw = ImageDraw.Draw(img)
-    try: title_font = ImageFont.truetype("arialbd.ttf", size=40); main_font = ImageFont.truetype("arial.ttf", size=24)
-    except IOError: title_font = main_font = ImageFont.load_default()
+    # --- INICIO CAMBIO: Añadir encoding="utf-8" ---
+    try:
+        title_font = ImageFont.truetype("arialbd.ttf", size=40, encoding="utf-8")
+        main_font = ImageFont.truetype("arial.ttf", size=24, encoding="utf-8")
+    except IOError:
+        title_font = main_font = ImageFont.load_default()
+    # --- FIN CAMBIO ---
     draw.text((BORDER_PX, BORDER_PX), f"GUÍA HORIZONTAL ({CARD_WIDTH_PX}x{CARD_HEIGHT_PX} px)", fill=(0,0,0), font=title_font)
     QR_X = CARD_WIDTH_PX - QR_SIZE_PX - BORDER_PX; QR_Y = 100; draw.rectangle([QR_X, QR_Y, QR_X + QR_SIZE_PX, QR_Y + QR_SIZE_PX], outline=(255,0,0), width=3); draw.text((QR_X + 10, QR_Y + 10), "ESPACIO QR (250x250)", fill=(255,0,0), font=main_font)
     TXT_X = BORDER_PX; TXT_Y = 400; draw.rectangle([TXT_X, TXT_Y, CARD_WIDTH_PX - BORDER_PX, CARD_HEIGHT_PX - BORDER_PX], outline=(0,0,255), width=3); draw.text((TXT_X + 10, TXT_Y + 10), "ESPACIO TEXTOS", fill=(0,0,255), font=main_font); draw.text((TXT_X + 10, TXT_Y + 40), "(Desc, Validez, Consec.)", fill=(0,0,255), font=main_font)
