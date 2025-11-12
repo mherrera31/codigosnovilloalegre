@@ -643,18 +643,18 @@ elif app_mode == "🛠️ Creador QR":
                                     file_options={"content-type": "image/png"}
                                 )
                                 # --- FIN CORRECCIÓN ---
-                                st.success(f"Plantilla '{template_name}' guardada en el bucket.")
+                                st.success(f"Plantilla '{template_name}' guardado")
                                 st.cache_data.clear() 
                                 st.rerun()
                         except Exception as e:
                             st.error(f"Error al guardar en Supabase: {e}")
 
         st.divider()
-        st.subheader("2. Plantillas Guardadas en el Bucket")
+        st.subheader("2. Plantillas Guardadas")
         
         templates = get_template_list()
         if not templates:
-            st.info("No hay plantillas guardadas en el bucket 'plantillas'.")
+            st.info("No hay plantillas guardadas")
         else:
             for t_name in templates:
                 with st.container(border=True):
