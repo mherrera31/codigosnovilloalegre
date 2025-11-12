@@ -1,4 +1,4 @@
-# app.py (VERSIÓN CORREGIDA - Corregido 'file_path' a 'path')
+# app.py (VERSIÓN CORREGIDA - Usa .getvalue() para Supabase)
 import streamlit as st
 import auth
 import db_service
@@ -13,10 +13,8 @@ import pandas as pd
 import zipfile
 import io
 import textwrap 
-# --- INICIO CAMBIO: Nuevos imports para Supabase ---
 from supabase import create_client, Client
-from db_config import SUPABASE_URL # Importar la URL base
-# --- FIN CAMBIO ---
+from db_config import SUPABASE_URL 
 
 # --- CONFIGURACIÓN Y CONSTANTES ---
 st.set_page_config(page_title="Sistema QR Novillo Alegre", layout="wide")
@@ -33,7 +31,7 @@ CARD_HEIGHT_MM = 50
 
 QR_SIZE_PX = 250; BORDER_PX = 50
 
-# --- INICIO CAMBIO: Inicializar Supabase Client para Storage ---
+# --- INICIALIZAR SUPABASE CLIENT PARA STORAGE ---
 try:
     SUPABASE_SERVICE_KEY = st.secrets["SUPABASE_SERVICE_KEY"]
     supabase_client: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
@@ -44,7 +42,6 @@ except KeyError:
 except Exception as e:
     st.error(f"Error al inicializar Supabase: {e}")
     st.stop()
-# --- FIN CAMBIO ---
 
 
 # --- Inicialización de Estado ---
@@ -62,12 +59,11 @@ if 'form_key_counter' not in st.session_state: st.session_state['form_key_counte
 if 'clear_form_inputs' not in st.session_state: st.session_state['clear_form_inputs'] = False
 if 'show_preview' not in st.session_state: st.session_state['show_preview'] = False
 
-# --- CAMBIO: Obtener lista de plantillas desde Supabase Storage ---
-@st.cache_data(ttl=60) # Cache por 60 segundos
+# --- Obtener lista de plantillas desde Supabase Storage ---
+@st.cache_data(ttl=60) 
 def get_template_list():
     try:
         files = supabase_client.storage.from_(BUCKET_NAME).list()
-        # Filtrar solo PNGs y quitar la extensión
         return sorted([
             f['name'].replace('.png', '') 
             for f in files 
@@ -94,9 +90,7 @@ def create_qr_card(
     card_img = None
     try:
         if template_name:
-            # Descargar los bytes del archivo desde el bucket
             file_bytes = supabase_client.storage.from_(BUCKET_NAME).download(f"{template_name}.png")
-            # Abrir los bytes en memoria
             card_img = Image.open(io.BytesIO(file_bytes)).convert('RGB')
             if card_img.size != (CARD_WIDTH_PX, CARD_HEIGHT_PX):
                 card_img = card_img.resize((CARD_WIDTH_PX, CARD_HEIGHT_PX))
@@ -104,13 +98,11 @@ def create_qr_card(
         st.error(f"Error al cargar plantilla '{template_name}': {e}. Usando fondo blanco.")
         card_img = None 
 
-    # Si no hay plantilla (o falla), crea fondo blanco
     if card_img is None: 
         card_img = Image.new('RGB', (CARD_WIDTH_PX, CARD_HEIGHT_PX), (255, 255, 255))
 
     draw = ImageDraw.Draw(card_img)
     
-    # Cargar 4 fuentes locales (DejaVuSans) con encoding="utf-8"
     try:
         desc_font = ImageFont.truetype("DejaVuSans.ttf", size=36, encoding="utf-8") 
         exp_font = ImageFont.truetype("DejaVuSans.ttf", size=30, encoding="utf-8")  
@@ -120,16 +112,11 @@ def create_qr_card(
         st.error("Error: No se encontraron los archivos de fuente (DejaVuSans.ttf o DejaVuSans-Bold.ttf). Asegúrate de que estén en la misma carpeta que app.py.")
         desc_font = exp_font = consecutive_font = sucursal_font = ImageFont.load_default()
 
-    # Generar QR
     qr = qrcode.QRCode(1, qrcode.constants.ERROR_CORRECT_M, 8, 2); qr.add_data(data_to_encode); qr.make(fit=True); qr_img = qr.make_image(fill_color="black", back_color="white").convert('RGB')
-    
-    # Lógica de Posiciones y Text Wrap
     
     # 1. Textos
     exp_text = f"Válido hasta: {expiration}"
     cons_text = f"{consecutive}" 
-
-    # Texto de Sucursales
     if not branch_names: 
         sucursales_text = "Válido en todas las sucursales"
     else:
@@ -648,11 +635,11 @@ elif app_mode == "🛠️ Creador QR":
                             if img.size != (CARD_WIDTH_PX, CARD_HEIGHT_PX):
                                 st.error(f"Error: La imagen debe ser de {CARD_WIDTH_PX}x{CARD_HEIGHT_PX} píxeles. La subida es de {img.size[0]}x{img.size[1]}px.")
                             else:
-                                file_bytes = up_file.getbuffer()
-                                # --- INICIO CORRECCIÓN: 'path' en lugar de 'file_path' ---
+                                # --- INICIO CORRECCIÓN: .getvalue() en lugar de .getbuffer() ---
+                                file_bytes = up_file.getvalue() 
                                 supabase_client.storage.from_(BUCKET_NAME).upload(
-                                    path=save_name, # <-- CORREGIDO
-                                    file=file_bytes,
+                                    path=save_name, 
+                                    file=file_bytes, # <-- Ahora son bytes
                                     file_options={"content-type": "image/png"}
                                 )
                                 # --- FIN CORRECCIÓN ---
