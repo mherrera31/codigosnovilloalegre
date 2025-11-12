@@ -1,4 +1,4 @@
-# app.py (VERSIÓN CORREGIDA - Ancho de Vista Previa fijado a 700px)
+# app.py (VERSIÓN CORREGIDA - Corregido 'file_path' a 'path')
 import streamlit as st
 import auth
 import db_service
@@ -112,10 +112,10 @@ def create_qr_card(
     
     # Cargar 4 fuentes locales (DejaVuSans) con encoding="utf-8"
     try:
-        desc_font = ImageFont.truetype("DejaVuSans.ttf", size=15, encoding="utf-8") 
-        exp_font = ImageFont.truetype("DejaVuSans.ttf", size=15, encoding="utf-8")  
-        consecutive_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=45, encoding="utf-8") 
-        sucursal_font = ImageFont.truetype("DejaVuSans.ttf", size=15, encoding="utf-8") 
+        desc_font = ImageFont.truetype("DejaVuSans.ttf", size=36, encoding="utf-8") 
+        exp_font = ImageFont.truetype("DejaVuSans.ttf", size=30, encoding="utf-8")  
+        consecutive_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=65, encoding="utf-8") 
+        sucursal_font = ImageFont.truetype("DejaVuSans.ttf", size=28, encoding="utf-8") 
     except IOError:
         st.error("Error: No se encontraron los archivos de fuente (DejaVuSans.ttf o DejaVuSans-Bold.ttf). Asegúrate de que estén en la misma carpeta que app.py.")
         desc_font = exp_font = consecutive_font = sucursal_font = ImageFont.load_default()
@@ -649,11 +649,13 @@ elif app_mode == "🛠️ Creador QR":
                                 st.error(f"Error: La imagen debe ser de {CARD_WIDTH_PX}x{CARD_HEIGHT_PX} píxeles. La subida es de {img.size[0]}x{img.size[1]}px.")
                             else:
                                 file_bytes = up_file.getbuffer()
+                                # --- INICIO CORRECCIÓN: 'path' en lugar de 'file_path' ---
                                 supabase_client.storage.from_(BUCKET_NAME).upload(
-                                    file_path=save_name,
+                                    path=save_name, # <-- CORREGIDO
                                     file=file_bytes,
                                     file_options={"content-type": "image/png"}
                                 )
+                                # --- FIN CORRECCIÓN ---
                                 st.success(f"Plantilla '{template_name}' guardada en el bucket.")
                                 st.cache_data.clear() 
                                 st.rerun()
