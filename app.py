@@ -1,4 +1,4 @@
-# app.py (VERSIÓN FINAL - Layout Rediseñado y Fuentes Grandes)
+# app.py (VERSIÓN FINAL REVISADA - Fuentes Grandes y Layout Ajustado)
 import streamlit as st
 import auth
 import db_service
@@ -86,7 +86,6 @@ def create_qr_card(
 ):
     """
     Genera JPG de tarjeta.
-    CAMBIOS: Restricciones eliminadas, fuentes grandes, footer con web.
     """
     card_img = None
     try:
@@ -104,28 +103,32 @@ def create_qr_card(
 
     draw = ImageDraw.Draw(card_img)
     
-    # --- FUENTES AJUSTADAS (GRANDES) ---
+    # --- FUENTES Y TAMAÑOS (MODIFICADOS SEGÚN PETICIÓN) ---
     try:
-        # Validez (Grande y legible)
-        validez_font = ImageFont.truetype("DejaVuSans.ttf", size=38, encoding="utf-8") 
-        # Fecha y Términos (Mediano)
-        footer_font = ImageFont.truetype("DejaVuSans.ttf", size=30, encoding="utf-8")  
-        # Web (Negrita, mismo tamaño que fecha)
-        web_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=30, encoding="utf-8")
-        # Consecutivo (Muy grande)
+        # Validez: Aumentada para legibilidad
+        validez_font = ImageFont.truetype("DejaVuSans.ttf", size=40, encoding="utf-8") 
+        
+        # Sucursales: Aumentada para legibilidad
+        sucursal_font = ImageFont.truetype("DejaVuSans.ttf", size=32, encoding="utf-8") 
+        
+        # Consecutivo: Muy grande y negrita
         consecutive_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=75, encoding="utf-8") 
-        # Sucursales (Legible)
-        sucursal_font = ImageFont.truetype("DejaVuSans.ttf", size=30, encoding="utf-8") 
+        
+        # Footer (Fecha y Términos): Mediano
+        footer_font = ImageFont.truetype("DejaVuSans.ttf", size=28, encoding="utf-8")  
+        
+        # Web: Negrita, mismo tamaño que el footer
+        web_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=28, encoding="utf-8")
+        
     except IOError:
-        st.error("Error: No se encontraron los archivos de fuente. Usando default.")
+        st.error("Error: No se encontraron los archivos de fuente (DejaVuSans). Usando default.")
         validez_font = footer_font = consecutive_font = sucursal_font = web_font = ImageFont.load_default()
 
     # Generar QR
     qr = qrcode.QRCode(1, qrcode.constants.ERROR_CORRECT_M, 8, 2); qr.add_data(data_to_encode); qr.make(fit=True); qr_img = qr.make_image(fill_color="black", back_color="white").convert('RGB')
     
-    # --- TEXTOS ---
-    validez_str = "Validez: " + ". ".join(scopes_text_list) if scopes_text_list else ""
-    # Restricciones ignoradas en el JPG
+    # --- DEFINICIÓN DE TEXTOS (Variable asegurada) ---
+    validez_text = "Validez: " + ". ".join(scopes_text_list) if scopes_text_list else ""
     
     date_text = f"Válido hasta: {expiration}"
     terms_text = "Ver Términos y Condiciones en"
@@ -137,7 +140,7 @@ def create_qr_card(
     else:
         sucursales_text = "Sucursales: " + ", ".join(branch_names)
 
-    # --- POSICIONAMIENTO ---
+    # --- POSICIONAMIENTO (LAYOUT) ---
 
     # 1. QR (Derecha, Arriba)
     QR_X = CARD_WIDTH_PX - QR_SIZE_PX - BORDER_PX
@@ -150,8 +153,8 @@ def create_qr_card(
     CONS_Y = QR_Y + QR_SIZE_PX + 10
     
     # 3. Sucursales (Centrado debajo del Consecutivo)
-    # Usamos textwrap por si hay muchas sucursales
-    suc_wrap = textwrap.wrap(sucursales_text, width=25) # Ancho estrecho para la columna derecha
+    # Usamos textwrap por si hay muchas sucursales, columna estrecha
+    suc_wrap = textwrap.wrap(sucursales_text, width=22) 
     current_suc_y = CONS_Y + 85 # Espacio despues del consecutivo
     
     # Dibujar QR y Columna Derecha
@@ -163,17 +166,17 @@ def create_qr_card(
         w = sucursal_font.getlength(line)
         x = (QR_X + (QR_SIZE_PX / 2)) - (w / 2)
         draw.text((int(x), int(current_suc_y)), line, fill=(80,80,80), font=sucursal_font)
-        current_suc_y += 35 # Salto de línea sucursales
+        current_suc_y += 38 # Salto de línea sucursales
 
     # --- FOOTER (Abajo al centro) ---
-    # Orden: Fecha -> Términos -> Web
+    # Orden de abajo hacia arriba: Web -> Terms -> Fecha
     
     # Calcular alturas
     bbox_web = web_font.getbbox(web_text); h_web = bbox_web[3] - bbox_web[1]
     bbox_terms = footer_font.getbbox(terms_text); h_terms = bbox_terms[3] - bbox_terms[1]
     bbox_date = footer_font.getbbox(date_text); h_date = bbox_date[3] - bbox_date[1]
     
-    # Posiciones Y (de abajo hacia arriba)
+    # Posiciones Y
     Y_WEB = CARD_HEIGHT_PX - BORDER_PX - h_web
     Y_TERMS = Y_WEB - h_terms - 10
     Y_DATE = Y_TERMS - h_date - 10
@@ -192,24 +195,25 @@ def create_qr_card(
     
     CENTER_AREA_X = (QR_X - BORDER_PX) / 2 + BORDER_PX # Centro del área disponible izquierda
     
-    # Envolver texto de validez (Ancho 35 chars aprox con fuente grande)
-    validez_lines = textwrap.wrap(validez_text, width=35)
+    # Envolver texto de validez (Ancho 30 chars aprox con fuente grande 40px)
+    validez_lines = textwrap.wrap(validez_text, width=30)
     
     # Calcular altura total del bloque de validez
     bbox_val = validez_font.getbbox("A")
-    h_val_line = (bbox_val[3] - bbox_val[1]) + 10
+    h_val_line = (bbox_val[3] - bbox_val[1]) + 15 # +15 padding
     total_h_val = len(validez_lines) * h_val_line
     
-    # Centrar verticalmente en el espacio disponible (aprox entre 150px y Y_DATE)
+    # Centrar verticalmente en el espacio disponible (aprox entre 100px y Y_DATE)
     AVAILABLE_TOP = 100
-    AVAILABLE_BOTTOM = Y_DATE - 20
+    AVAILABLE_BOTTOM = Y_DATE - 30
     Y_CENTER_VAL = AVAILABLE_TOP + ((AVAILABLE_BOTTOM - AVAILABLE_TOP) / 2)
     Y_START_VAL = Y_CENTER_VAL - (total_h_val / 2)
     
+    # Dibujar Validez
     current_y_val = Y_START_VAL
     for line in validez_lines:
         w = validez_font.getlength(line)
-        x = CENTER_AREA_X - (w / 2) # Centrado en el área izquierda
+        x = CENTER_AREA_X - (w / 2) 
         draw.text((int(x), int(current_y_val)), line, fill=(0,0,0), font=validez_font)
         current_y_val += h_val_line
 
@@ -504,7 +508,7 @@ elif app_mode == "🛠️ Creador QR":
                         generated_paths = []; coupons = result['coupon_entries']
 
                         scopes_text_list = st.session_state[f"{form_key}_scopes"]
-                        restrictions_text_list = st.session_state[f"{form_key}_restrictions"]
+                        # restrictions_text_list se ignora para la imagen, solo se usa en DB
 
                         with st.spinner("Creando archivos ZIP..."):
                             zip_buffer = io.BytesIO()
@@ -517,7 +521,7 @@ elif app_mode == "🛠️ Creador QR":
                                         template_name_for_submit, 
                                         path, 
                                         scopes_text_list, 
-                                        restrictions_text_list, 
+                                        [], # Empty restrictions for card
                                         branch_names_for_card, 
                                         entry['expiration_date'], 
                                         f"{entry['consecutive']:04d}"
@@ -561,7 +565,7 @@ elif app_mode == "🛠️ Creador QR":
                     # Leer valores en vivo del st.session_state
                     live_template_name_str = st.session_state.get(f"{form_key}_template", "Fondo Blanco")
                     live_scopes = st.session_state.get(f"{form_key}_scopes", [])
-                    live_restric = st.session_state.get(f"{form_key}_restrictions", [])
+                    # live_restric se ignora para la vista previa tambien
                     live_branches = st.session_state.get(f"{form_key}_branches", [])
                     live_all_branches = st.session_state.get(f"{form_key}_all_branches", False)
                     live_months = st.session_state.get(f"{form_key}_months", 3)
@@ -581,7 +585,7 @@ elif app_mode == "🛠️ Creador QR":
                         template_name_for_preview, 
                         preview_path,
                         live_scopes,
-                        live_restric,
+                        [], # Empty restrictions
                         live_branch_list,
                         (datetime.now() + timedelta(days=live_months * 30)).strftime("%Y-%m-%d"),
                         "0000"
