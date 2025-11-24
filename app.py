@@ -107,19 +107,19 @@ def create_qr_card(
     # --- FUENTES REAJUSTADAS (Más pequeñas y proporcionales) ---
     try:
         # Validez: Reducido a 30 (antes 40)
-        validez_font = ImageFont.truetype("DejaVuSans.ttf", size=22, encoding="utf-8") 
+        validez_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=22, encoding="utf-8") 
         
         # Sucursales: Reducido a 24 (antes 32)
-        sucursal_font = ImageFont.truetype("DejaVuSans.ttf", size=15, encoding="utf-8") 
+        sucursal_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=19, encoding="utf-8") 
         
         # Consecutivo: Reducido a 55 (antes 75)
         consecutive_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=55, encoding="utf-8") 
         
         # Footer (Fecha y Términos): Reducido a 24 (antes 30)
-        footer_font = ImageFont.truetype("DejaVuSans.ttf", size=22, encoding="utf-8")  
+        footer_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=24, encoding="utf-8")  
         
         # Web: Reducido a 24 (antes 30)
-        web_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=22, encoding="utf-8")
+        web_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=24, encoding="utf-8")
         
     except IOError:
         st.error("Error: No se encontraron los archivos de fuente (DejaVuSans). Usando default.")
