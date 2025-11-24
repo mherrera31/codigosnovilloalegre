@@ -1,4 +1,4 @@
-# app.py (VERSIÓN FINAL REVISADA - Fuentes Grandes y Layout Ajustado)
+# app.py (VERSIÓN CORREGIDA - Layout Proporcional y Validez sobre Fecha)
 import streamlit as st
 import auth
 import db_service
@@ -79,13 +79,14 @@ def create_qr_card(
     template_name: str, 
     output_path: str, 
     scopes_text_list: list, 
-    restrictions_text_list: list, # Se recibe pero NO SE USA en la imagen
+    restrictions_text_list: list, 
     branch_names: list, 
     expiration: str, 
     consecutive: str
 ):
     """
     Genera JPG de tarjeta.
+    CAMBIOS: Validez sobre fecha, tamaños reducidos y proporcionales.
     """
     card_img = None
     try:
@@ -103,22 +104,22 @@ def create_qr_card(
 
     draw = ImageDraw.Draw(card_img)
     
-    # --- FUENTES Y TAMAÑOS (MODIFICADOS SEGÚN PETICIÓN) ---
+    # --- FUENTES REAJUSTADAS (Más pequeñas y proporcionales) ---
     try:
-        # Validez: Aumentada para legibilidad
-        validez_font = ImageFont.truetype("DejaVuSans.ttf", size=40, encoding="utf-8") 
+        # Validez: Reducido a 30 (antes 40)
+        validez_font = ImageFont.truetype("DejaVuSans.ttf", size=30, encoding="utf-8") 
         
-        # Sucursales: Aumentada para legibilidad
-        sucursal_font = ImageFont.truetype("DejaVuSans.ttf", size=32, encoding="utf-8") 
+        # Sucursales: Reducido a 24 (antes 32)
+        sucursal_font = ImageFont.truetype("DejaVuSans.ttf", size=24, encoding="utf-8") 
         
-        # Consecutivo: Muy grande y negrita
-        consecutive_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=75, encoding="utf-8") 
+        # Consecutivo: Reducido a 55 (antes 75) - Tamaño "Original" solicitado
+        consecutive_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=55, encoding="utf-8") 
         
-        # Footer (Fecha y Términos): Mediano
-        footer_font = ImageFont.truetype("DejaVuSans.ttf", size=28, encoding="utf-8")  
+        # Footer (Fecha y Términos): Reducido a 24 (antes 30)
+        footer_font = ImageFont.truetype("DejaVuSans.ttf", size=24, encoding="utf-8")  
         
-        # Web: Negrita, mismo tamaño que el footer
-        web_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=28, encoding="utf-8")
+        # Web: Reducido a 24 (antes 30)
+        web_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=24, encoding="utf-8")
         
     except IOError:
         st.error("Error: No se encontraron los archivos de fuente (DejaVuSans). Usando default.")
@@ -127,7 +128,7 @@ def create_qr_card(
     # Generar QR
     qr = qrcode.QRCode(1, qrcode.constants.ERROR_CORRECT_M, 8, 2); qr.add_data(data_to_encode); qr.make(fit=True); qr_img = qr.make_image(fill_color="black", back_color="white").convert('RGB')
     
-    # --- DEFINICIÓN DE TEXTOS (Variable asegurada) ---
+    # --- TEXTOS ---
     validez_text = "Validez: " + ". ".join(scopes_text_list) if scopes_text_list else ""
     
     date_text = f"Válido hasta: {expiration}"
@@ -153,9 +154,8 @@ def create_qr_card(
     CONS_Y = QR_Y + QR_SIZE_PX + 10
     
     # 3. Sucursales (Centrado debajo del Consecutivo)
-    # Usamos textwrap por si hay muchas sucursales, columna estrecha
-    suc_wrap = textwrap.wrap(sucursales_text, width=22) 
-    current_suc_y = CONS_Y + 85 # Espacio despues del consecutivo
+    suc_wrap = textwrap.wrap(sucursales_text, width=30) # Un poco más ancho ahora que la letra es pequeña
+    current_suc_y = CONS_Y + 65 # Espacio ajustado para letra más pequeña
     
     # Dibujar QR y Columna Derecha
     qr_scaled = qr_img.resize((QR_SIZE_PX, QR_SIZE_PX))
@@ -166,54 +166,49 @@ def create_qr_card(
         w = sucursal_font.getlength(line)
         x = (QR_X + (QR_SIZE_PX / 2)) - (w / 2)
         draw.text((int(x), int(current_suc_y)), line, fill=(80,80,80), font=sucursal_font)
-        current_suc_y += 38 # Salto de línea sucursales
+        current_suc_y += 30 # Salto de línea menor
 
-    # --- FOOTER (Abajo al centro) ---
-    # Orden de abajo hacia arriba: Web -> Terms -> Fecha
+    # --- FOOTER Y VALIDEZ (Pila Central Inferior) ---
+    # Orden de abajo hacia arriba: Web -> Terms -> Fecha -> Validez
     
-    # Calcular alturas
+    # Calcular alturas de líneas simples
     bbox_web = web_font.getbbox(web_text); h_web = bbox_web[3] - bbox_web[1]
     bbox_terms = footer_font.getbbox(terms_text); h_terms = bbox_terms[3] - bbox_terms[1]
     bbox_date = footer_font.getbbox(date_text); h_date = bbox_date[3] - bbox_date[1]
     
-    # Posiciones Y
+    # Posiciones Y (Construyendo hacia arriba desde el borde inferior)
     Y_WEB = CARD_HEIGHT_PX - BORDER_PX - h_web
-    Y_TERMS = Y_WEB - h_terms - 10
-    Y_DATE = Y_TERMS - h_date - 10
+    Y_TERMS = Y_WEB - h_terms - 8 # Padding reducido
+    Y_DATE = Y_TERMS - h_date - 8
     
-    # Centrar X
+    # Centrar X para el footer simple
     X_WEB = (CARD_WIDTH_PX / 2) - (web_font.getlength(web_text) / 2)
     X_TERMS = (CARD_WIDTH_PX / 2) - (footer_font.getlength(terms_text) / 2)
     X_DATE = (CARD_WIDTH_PX / 2) - (footer_font.getlength(date_text) / 2)
     
+    # Dibujar Footer
     draw.text((int(X_DATE), int(Y_DATE)), date_text, fill=(0,0,0), font=footer_font)
     draw.text((int(X_TERMS), int(Y_TERMS)), terms_text, fill=(0,0,0), font=footer_font)
     draw.text((int(X_WEB), int(Y_WEB)), web_text, fill=(0,0,0), font=web_font)
 
-    # --- VALIDEZ (Centro Izquierda) ---
-    # Ocupa el espacio restante a la izquierda del QR y arriba del Footer
+    # --- VALIDEZ (Encima de la Fecha) ---
     
-    CENTER_AREA_X = (QR_X - BORDER_PX) / 2 + BORDER_PX # Centro del área disponible izquierda
-    
-    # Envolver texto de validez (Ancho 30 chars aprox con fuente grande 40px)
-    validez_lines = textwrap.wrap(validez_text, width=30)
+    # Envolver texto de validez (Ancho mayor ahora que la fuente es 30)
+    validez_lines = textwrap.wrap(validez_text, width=50)
     
     # Calcular altura total del bloque de validez
     bbox_val = validez_font.getbbox("A")
-    h_val_line = (bbox_val[3] - bbox_val[1]) + 15 # +15 padding
+    h_val_line = (bbox_val[3] - bbox_val[1]) + 10
     total_h_val = len(validez_lines) * h_val_line
     
-    # Centrar verticalmente en el espacio disponible (aprox entre 100px y Y_DATE)
-    AVAILABLE_TOP = 100
-    AVAILABLE_BOTTOM = Y_DATE - 30
-    Y_CENTER_VAL = AVAILABLE_TOP + ((AVAILABLE_BOTTOM - AVAILABLE_TOP) / 2)
-    Y_START_VAL = Y_CENTER_VAL - (total_h_val / 2)
+    # Posicionar el bloque DE VALIDEZ justo ARRIBA de la fecha
+    Y_START_VAL = Y_DATE - total_h_val - 20 # 20px de separación con la fecha
     
     # Dibujar Validez
     current_y_val = Y_START_VAL
     for line in validez_lines:
         w = validez_font.getlength(line)
-        x = CENTER_AREA_X - (w / 2) 
+        x = (CARD_WIDTH_PX / 2) - (w / 2) # Centrado en toda la tarjeta
         draw.text((int(x), int(current_y_val)), line, fill=(0,0,0), font=validez_font)
         current_y_val += h_val_line
 
@@ -508,7 +503,7 @@ elif app_mode == "🛠️ Creador QR":
                         generated_paths = []; coupons = result['coupon_entries']
 
                         scopes_text_list = st.session_state[f"{form_key}_scopes"]
-                        # restrictions_text_list se ignora para la imagen, solo se usa en DB
+                        restrictions_text_list = st.session_state[f"{form_key}_restrictions"]
 
                         with st.spinner("Creando archivos ZIP..."):
                             zip_buffer = io.BytesIO()
@@ -521,7 +516,7 @@ elif app_mode == "🛠️ Creador QR":
                                         template_name_for_submit, 
                                         path, 
                                         scopes_text_list, 
-                                        [], # Empty restrictions for card
+                                        restrictions_text_list, 
                                         branch_names_for_card, 
                                         entry['expiration_date'], 
                                         f"{entry['consecutive']:04d}"
@@ -565,7 +560,7 @@ elif app_mode == "🛠️ Creador QR":
                     # Leer valores en vivo del st.session_state
                     live_template_name_str = st.session_state.get(f"{form_key}_template", "Fondo Blanco")
                     live_scopes = st.session_state.get(f"{form_key}_scopes", [])
-                    # live_restric se ignora para la vista previa tambien
+                    live_restric = st.session_state.get(f"{form_key}_restrictions", [])
                     live_branches = st.session_state.get(f"{form_key}_branches", [])
                     live_all_branches = st.session_state.get(f"{form_key}_all_branches", False)
                     live_months = st.session_state.get(f"{form_key}_months", 3)
