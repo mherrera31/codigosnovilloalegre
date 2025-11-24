@@ -1,4 +1,4 @@
-# app.py (VERSIÓN CORREGIDA - Usa .getvalue() para Supabase)
+# app.py (VERSIÓN FINAL - Layout Rediseñado y Fuentes Grandes)
 import streamlit as st
 import auth
 import db_service
@@ -79,13 +79,14 @@ def create_qr_card(
     template_name: str, 
     output_path: str, 
     scopes_text_list: list, 
-    restrictions_text_list: list, 
+    restrictions_text_list: list, # Se recibe pero NO SE USA en la imagen
     branch_names: list, 
     expiration: str, 
     consecutive: str
 ):
     """
-    Genera JPG de tarjeta 8.5x5cm con QR.
+    Genera JPG de tarjeta.
+    CAMBIOS: Restricciones eliminadas, fuentes grandes, footer con web.
     """
     card_img = None
     try:
@@ -103,98 +104,114 @@ def create_qr_card(
 
     draw = ImageDraw.Draw(card_img)
     
+    # --- FUENTES AJUSTADAS (GRANDES) ---
     try:
-        desc_font = ImageFont.truetype("DejaVuSans.ttf", size=15, encoding="utf-8") 
-        exp_font = ImageFont.truetype("DejaVuSans.ttf", size=15, encoding="utf-8")  
-        consecutive_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=45, encoding="utf-8") 
-        sucursal_font = ImageFont.truetype("DejaVuSans.ttf", size=15, encoding="utf-8") 
+        # Validez (Grande y legible)
+        validez_font = ImageFont.truetype("DejaVuSans.ttf", size=38, encoding="utf-8") 
+        # Fecha y Términos (Mediano)
+        footer_font = ImageFont.truetype("DejaVuSans.ttf", size=30, encoding="utf-8")  
+        # Web (Negrita, mismo tamaño que fecha)
+        web_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=30, encoding="utf-8")
+        # Consecutivo (Muy grande)
+        consecutive_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=75, encoding="utf-8") 
+        # Sucursales (Legible)
+        sucursal_font = ImageFont.truetype("DejaVuSans.ttf", size=30, encoding="utf-8") 
     except IOError:
-        st.error("Error: No se encontraron los archivos de fuente (DejaVuSans.ttf o DejaVuSans-Bold.ttf). Asegúrate de que estén en la misma carpeta que app.py.")
-        desc_font = exp_font = consecutive_font = sucursal_font = ImageFont.load_default()
+        st.error("Error: No se encontraron los archivos de fuente. Usando default.")
+        validez_font = footer_font = consecutive_font = sucursal_font = web_font = ImageFont.load_default()
 
+    # Generar QR
     qr = qrcode.QRCode(1, qrcode.constants.ERROR_CORRECT_M, 8, 2); qr.add_data(data_to_encode); qr.make(fit=True); qr_img = qr.make_image(fill_color="black", back_color="white").convert('RGB')
     
-    # 1. Textos
-    exp_text = f"Válido hasta: {expiration}"
-    cons_text = f"{consecutive}" 
+    # --- TEXTOS ---
+    validez_str = "Validez: " + ". ".join(scopes_text_list) if scopes_text_list else ""
+    # Restricciones ignoradas en el JPG
+    
+    date_text = f"Válido hasta: {expiration}"
+    terms_text = "Ver Términos y Condiciones en"
+    web_text = "www.restauranteelnovilloalegre.com"
+    cons_text = f"{consecutive}"
+    
     if not branch_names: 
         sucursales_text = "Válido en todas las sucursales"
     else:
         sucursales_text = "Sucursales: " + ", ".join(branch_names)
 
-    # 2. Posición QR
+    # --- POSICIONAMIENTO ---
+
+    # 1. QR (Derecha, Arriba)
     QR_X = CARD_WIDTH_PX - QR_SIZE_PX - BORDER_PX
-    QR_Y = BORDER_PX + 50 
+    QR_Y = BORDER_PX + 30
     QR_POS = (int(QR_X), int(QR_Y))
 
-    # 3. Calcular anchos
-    exp_width = exp_font.getlength(exp_text)
+    # 2. Consecutivo (Centrado debajo del QR)
     cons_width = consecutive_font.getlength(cons_text)
-    sucursales_width = sucursal_font.getlength(sucursales_text)
-
-    # 4. Posición Consecutivo
-    CONS_X_CENTERED_ON_QR = (QR_X + (QR_SIZE_PX / 2)) - (cons_width / 2)
-    CONS_Y = QR_Y + QR_SIZE_PX + 20 
-    CONS_POS = (int(CONS_X_CENTERED_ON_QR), int(CONS_Y))
-
-    # 5. Posición Sucursales
-    cons_bbox = consecutive_font.getbbox(cons_text)
-    cons_height = cons_bbox[3] - cons_bbox[1]
-    SUC_X_CENTERED_ON_QR = (QR_X + (QR_SIZE_PX / 2)) - (sucursales_width / 2)
-    SUC_Y = CONS_Y + cons_height + 15 
-    SUC_POS = (int(SUC_X_CENTERED_ON_QR), int(SUC_Y))
-
-    # 6. Posición Fecha
-    exp_bbox = exp_font.getbbox(exp_text)
-    exp_height = exp_bbox[3] - exp_bbox[1]
-    EXP_X_CENTERED_ON_CARD = (CARD_WIDTH_PX / 2) - (exp_width / 2)
-    EXP_Y_BOTTOM = CARD_HEIGHT_PX - BORDER_PX - exp_height
-    EXP_POS = (int(EXP_X_CENTERED_ON_CARD), int(EXP_Y_BOTTOM))
-
-    # 7. Lógica de Text Wrap para Validez/Restricciones
-    WRAP_CHARS = 55 
-    GAP_BETWEEN_BLOCKS = 20 
+    CONS_X = (QR_X + (QR_SIZE_PX / 2)) - (cons_width / 2)
+    CONS_Y = QR_Y + QR_SIZE_PX + 10
     
-    validez_text = "Validez: " + ". ".join(scopes_text_list) if scopes_text_list else ""
-    restric_text = "Restricciones: " + ". ".join(restrictions_text_list) if restrictions_text_list else ""
-
-    wrapped_validez = textwrap.wrap(validez_text, width=WRAP_CHARS)
-    wrapped_restric = textwrap.wrap(restric_text, width=WRAP_CHARS)
+    # 3. Sucursales (Centrado debajo del Consecutivo)
+    # Usamos textwrap por si hay muchas sucursales
+    suc_wrap = textwrap.wrap(sucursales_text, width=25) # Ancho estrecho para la columna derecha
+    current_suc_y = CONS_Y + 85 # Espacio despues del consecutivo
     
-    desc_bbox = desc_font.getbbox("A")
-    line_height = (desc_bbox[3] - desc_bbox[1]) + 5 
-    
-    total_text_height = 0
-    if wrapped_validez:
-        total_text_height += (len(wrapped_validez) * line_height)
-    if wrapped_restric:
-        total_text_height += (len(wrapped_restric) * line_height)
-    if wrapped_validez and wrapped_restric:
-        total_text_height += GAP_BETWEEN_BLOCKS 
-    
-    current_y = EXP_Y_BOTTOM - 15 - total_text_height 
-
-    for line in wrapped_validez:
-        line_width = desc_font.getlength(line)
-        LINE_X_CENTERED = (CARD_WIDTH_PX / 2) - (line_width / 2)
-        draw.text((int(LINE_X_CENTERED), int(current_y)), line, fill=(0,0,0), font=desc_font)
-        current_y += line_height
-    
-    if wrapped_validez and wrapped_restric:
-        current_y += GAP_BETWEEN_BLOCKS
-
-    for line in wrapped_restric:
-        line_width = desc_font.getlength(line)
-        LINE_X_CENTERED = (CARD_WIDTH_PX / 2) - (line_width / 2)
-        draw.text((int(LINE_X_CENTERED), int(current_y)), line, fill=(0,0,0), font=desc_font)
-        current_y += line_height
-    
-    draw.text(CONS_POS, cons_text, fill=(0,0,0), font=consecutive_font)
-    draw.text(SUC_POS, sucursales_text, fill=(80,80,80), font=sucursal_font) 
-    draw.text(EXP_POS, exp_text, fill=(100,100,100), font=exp_font)
-    
+    # Dibujar QR y Columna Derecha
     qr_scaled = qr_img.resize((QR_SIZE_PX, QR_SIZE_PX))
     card_img.paste(qr_scaled, QR_POS)
+    draw.text((int(CONS_X), int(CONS_Y)), cons_text, fill=(0,0,0), font=consecutive_font)
+    
+    for line in suc_wrap:
+        w = sucursal_font.getlength(line)
+        x = (QR_X + (QR_SIZE_PX / 2)) - (w / 2)
+        draw.text((int(x), int(current_suc_y)), line, fill=(80,80,80), font=sucursal_font)
+        current_suc_y += 35 # Salto de línea sucursales
+
+    # --- FOOTER (Abajo al centro) ---
+    # Orden: Fecha -> Términos -> Web
+    
+    # Calcular alturas
+    bbox_web = web_font.getbbox(web_text); h_web = bbox_web[3] - bbox_web[1]
+    bbox_terms = footer_font.getbbox(terms_text); h_terms = bbox_terms[3] - bbox_terms[1]
+    bbox_date = footer_font.getbbox(date_text); h_date = bbox_date[3] - bbox_date[1]
+    
+    # Posiciones Y (de abajo hacia arriba)
+    Y_WEB = CARD_HEIGHT_PX - BORDER_PX - h_web
+    Y_TERMS = Y_WEB - h_terms - 10
+    Y_DATE = Y_TERMS - h_date - 10
+    
+    # Centrar X
+    X_WEB = (CARD_WIDTH_PX / 2) - (web_font.getlength(web_text) / 2)
+    X_TERMS = (CARD_WIDTH_PX / 2) - (footer_font.getlength(terms_text) / 2)
+    X_DATE = (CARD_WIDTH_PX / 2) - (footer_font.getlength(date_text) / 2)
+    
+    draw.text((int(X_DATE), int(Y_DATE)), date_text, fill=(0,0,0), font=footer_font)
+    draw.text((int(X_TERMS), int(Y_TERMS)), terms_text, fill=(0,0,0), font=footer_font)
+    draw.text((int(X_WEB), int(Y_WEB)), web_text, fill=(0,0,0), font=web_font)
+
+    # --- VALIDEZ (Centro Izquierda) ---
+    # Ocupa el espacio restante a la izquierda del QR y arriba del Footer
+    
+    CENTER_AREA_X = (QR_X - BORDER_PX) / 2 + BORDER_PX # Centro del área disponible izquierda
+    
+    # Envolver texto de validez (Ancho 35 chars aprox con fuente grande)
+    validez_lines = textwrap.wrap(validez_text, width=35)
+    
+    # Calcular altura total del bloque de validez
+    bbox_val = validez_font.getbbox("A")
+    h_val_line = (bbox_val[3] - bbox_val[1]) + 10
+    total_h_val = len(validez_lines) * h_val_line
+    
+    # Centrar verticalmente en el espacio disponible (aprox entre 150px y Y_DATE)
+    AVAILABLE_TOP = 100
+    AVAILABLE_BOTTOM = Y_DATE - 20
+    Y_CENTER_VAL = AVAILABLE_TOP + ((AVAILABLE_BOTTOM - AVAILABLE_TOP) / 2)
+    Y_START_VAL = Y_CENTER_VAL - (total_h_val / 2)
+    
+    current_y_val = Y_START_VAL
+    for line in validez_lines:
+        w = validez_font.getlength(line)
+        x = CENTER_AREA_X - (w / 2) # Centrado en el área izquierda
+        draw.text((int(x), int(current_y_val)), line, fill=(0,0,0), font=validez_font)
+        current_y_val += h_val_line
 
     card_img.save(output_path, "JPEG", quality=95); return output_path
 
@@ -366,7 +383,7 @@ elif app_mode == "🛠️ Creador QR":
 
                 default_restrictions_raw = [] if st.session_state.get('clear_form_inputs') else st.session_state.get(f"{form_key}_restrictions", [])
                 default_restrictions = [r for r in default_restrictions_raw if r in restriction_list] 
-                selected_restriction_names = st.multiselect("Restricciones (Aparecerá en la tarjeta)", options=restriction_list, default=default_restrictions, key=f"{form_key}_restrictions")
+                selected_restriction_names = st.multiselect("Restricciones (NO se imprimirá en tarjeta, solo sistema)", options=restriction_list, default=default_restrictions, key=f"{form_key}_restrictions")
 
                 default_count = None if st.session_state.get('clear_form_inputs') else st.session_state.get(f'{form_key}_count')
                 count = st.number_input("Cantidad (*Obligatorio*)", min_value=1, max_value=1000, value=default_count, placeholder="1", key=f'{form_key}_count')
@@ -616,7 +633,7 @@ elif app_mode == "🛠️ Creador QR":
         with st.form("template_form", clear_on_submit=True):
             template_name = st.text_input("Nombre de la Plantilla (ej: Navidad2025, DiaPadre)")
             up_file = st.file_uploader(f"Suba PNG ({CARD_WIDTH_PX}x{CARD_HEIGHT_PX}px, Horizontal)", type="png")
-            submitted = st.form_submit_button("Guardar Plantilla")
+            submitted = st.form_submit_button("Guardar Plantilla en Supabase")
             
             if submitted:
                 if not template_name:
@@ -643,18 +660,18 @@ elif app_mode == "🛠️ Creador QR":
                                     file_options={"content-type": "image/png"}
                                 )
                                 # --- FIN CORRECCIÓN ---
-                                st.success(f"Plantilla '{template_name}' guardado")
+                                st.success(f"Plantilla '{template_name}' guardada en el bucket.")
                                 st.cache_data.clear() 
                                 st.rerun()
                         except Exception as e:
                             st.error(f"Error al guardar en Supabase: {e}")
 
         st.divider()
-        st.subheader("2. Plantillas Guardadas")
+        st.subheader("2. Plantillas Guardadas en el Bucket")
         
         templates = get_template_list()
         if not templates:
-            st.info("No hay plantillas guardadas")
+            st.info("No hay plantillas guardadas en el bucket 'plantillas'.")
         else:
             for t_name in templates:
                 with st.container(border=True):
