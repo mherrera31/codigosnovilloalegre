@@ -1,4 +1,4 @@
-# app.py (VERSIÓN CORREGIDA - Layout Proporcional y Validez sobre Fecha)
+# app.py (VERSIÓN FINAL - Fecha corregida a DD-MM-YYYY)
 import streamlit as st
 import auth
 import db_service
@@ -107,19 +107,19 @@ def create_qr_card(
     # --- FUENTES REAJUSTADAS (Más pequeñas y proporcionales) ---
     try:
         # Validez: Reducido a 30 (antes 40)
-        validez_font = ImageFont.truetype("DejaVuSans.ttf", size=30, encoding="utf-8") 
+        validez_font = ImageFont.truetype("DejaVuSans.ttf", size=22, encoding="utf-8") 
         
         # Sucursales: Reducido a 24 (antes 32)
-        sucursal_font = ImageFont.truetype("DejaVuSans.ttf", size=24, encoding="utf-8") 
+        sucursal_font = ImageFont.truetype("DejaVuSans.ttf", size=15, encoding="utf-8") 
         
-        # Consecutivo: Reducido a 55 (antes 75) - Tamaño "Original" solicitado
+        # Consecutivo: Reducido a 55 (antes 75)
         consecutive_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=55, encoding="utf-8") 
         
         # Footer (Fecha y Términos): Reducido a 24 (antes 30)
-        footer_font = ImageFont.truetype("DejaVuSans.ttf", size=24, encoding="utf-8")  
+        footer_font = ImageFont.truetype("DejaVuSans.ttf", size=22, encoding="utf-8")  
         
         # Web: Reducido a 24 (antes 30)
-        web_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=24, encoding="utf-8")
+        web_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=22, encoding="utf-8")
         
     except IOError:
         st.error("Error: No se encontraron los archivos de fuente (DejaVuSans). Usando default.")
@@ -131,6 +131,7 @@ def create_qr_card(
     # --- TEXTOS ---
     validez_text = "Validez: " + ". ".join(scopes_text_list) if scopes_text_list else ""
     
+    # La fecha ya viene formateada desde la llamada a la función
     date_text = f"Válido hasta: {expiration}"
     terms_text = "Ver Términos y Condiciones en"
     web_text = "www.restauranteelnovilloalegre.com"
@@ -154,8 +155,8 @@ def create_qr_card(
     CONS_Y = QR_Y + QR_SIZE_PX + 10
     
     # 3. Sucursales (Centrado debajo del Consecutivo)
-    suc_wrap = textwrap.wrap(sucursales_text, width=30) # Un poco más ancho ahora que la letra es pequeña
-    current_suc_y = CONS_Y + 65 # Espacio ajustado para letra más pequeña
+    suc_wrap = textwrap.wrap(sucursales_text, width=30) 
+    current_suc_y = CONS_Y + 65 
     
     # Dibujar QR y Columna Derecha
     qr_scaled = qr_img.resize((QR_SIZE_PX, QR_SIZE_PX))
@@ -166,10 +167,9 @@ def create_qr_card(
         w = sucursal_font.getlength(line)
         x = (QR_X + (QR_SIZE_PX / 2)) - (w / 2)
         draw.text((int(x), int(current_suc_y)), line, fill=(80,80,80), font=sucursal_font)
-        current_suc_y += 30 # Salto de línea menor
+        current_suc_y += 30 
 
     # --- FOOTER Y VALIDEZ (Pila Central Inferior) ---
-    # Orden de abajo hacia arriba: Web -> Terms -> Fecha -> Validez
     
     # Calcular alturas de líneas simples
     bbox_web = web_font.getbbox(web_text); h_web = bbox_web[3] - bbox_web[1]
@@ -178,7 +178,7 @@ def create_qr_card(
     
     # Posiciones Y (Construyendo hacia arriba desde el borde inferior)
     Y_WEB = CARD_HEIGHT_PX - BORDER_PX - h_web
-    Y_TERMS = Y_WEB - h_terms - 8 # Padding reducido
+    Y_TERMS = Y_WEB - h_terms - 8 
     Y_DATE = Y_TERMS - h_date - 8
     
     # Centrar X para el footer simple
@@ -193,22 +193,20 @@ def create_qr_card(
 
     # --- VALIDEZ (Encima de la Fecha) ---
     
-    # Envolver texto de validez (Ancho mayor ahora que la fuente es 30)
     validez_lines = textwrap.wrap(validez_text, width=50)
     
-    # Calcular altura total del bloque de validez
     bbox_val = validez_font.getbbox("A")
     h_val_line = (bbox_val[3] - bbox_val[1]) + 10
     total_h_val = len(validez_lines) * h_val_line
     
     # Posicionar el bloque DE VALIDEZ justo ARRIBA de la fecha
-    Y_START_VAL = Y_DATE - total_h_val - 20 # 20px de separación con la fecha
+    Y_START_VAL = Y_DATE - total_h_val - 20 
     
     # Dibujar Validez
     current_y_val = Y_START_VAL
     for line in validez_lines:
         w = validez_font.getlength(line)
-        x = (CARD_WIDTH_PX / 2) - (w / 2) # Centrado en toda la tarjeta
+        x = (CARD_WIDTH_PX / 2) - (w / 2) 
         draw.text((int(x), int(current_y_val)), line, fill=(0,0,0), font=validez_font)
         current_y_val += h_val_line
 
@@ -511,6 +509,15 @@ elif app_mode == "🛠️ Creador QR":
                                 for entry in coupons:
                                     path = os.path.join(GENERATED_QRS_DIR, f"{entry['consecutive']:04d}.jpg")
                                     
+                                    # --- INICIO CAMBIO (FECHA FORMATEADA EN DB) ---
+                                    try:
+                                        # Formatear la fecha de la DB (YYYY-MM-DD) a DD-MM-YYYY
+                                        date_obj = datetime.strptime(entry['expiration_date'][:10], "%Y-%m-%d")
+                                        formatted_date = date_obj.strftime("%d-%m-%Y")
+                                    except Exception:
+                                        formatted_date = entry['expiration_date']
+                                    # --- FIN CAMBIO ---
+
                                     create_qr_card(
                                         entry['id'], 
                                         template_name_for_submit, 
@@ -518,7 +525,7 @@ elif app_mode == "🛠️ Creador QR":
                                         scopes_text_list, 
                                         restrictions_text_list, 
                                         branch_names_for_card, 
-                                        entry['expiration_date'], 
+                                        formatted_date, # <-- Pasamos la fecha formateada
                                         f"{entry['consecutive']:04d}"
                                     )
                                     zf.write(path, os.path.basename(path))
@@ -545,19 +552,16 @@ elif app_mode == "🛠️ Creador QR":
         
         # --- FIN DEL st.form ---
         
-        # --- INICIO CAMBIO: Vista Previa (FUERA del form) ---
+        # --- Vista Previa (FUERA del form) ---
         st.divider()
         st.subheader("Vista Previa")
         
-        # 1. El Botón
         if st.button("Ver/Actualizar Vista Previa", key=f"{form_key}_preview_btn"):
             st.session_state['show_preview'] = True
         
-        # 2. El Contenedor de la Vista Previa
         if st.session_state.get('show_preview', False):
             with st.container(border=True): 
                 try:
-                    # Leer valores en vivo del st.session_state
                     live_template_name_str = st.session_state.get(f"{form_key}_template", "Fondo Blanco")
                     live_scopes = st.session_state.get(f"{form_key}_scopes", [])
                     live_restric = st.session_state.get(f"{form_key}_restrictions", [])
@@ -575,6 +579,10 @@ elif app_mode == "🛠️ Creador QR":
 
                     preview_path = os.path.join(GENERATED_QRS_DIR, "preview.jpg")
                     
+                    # --- INICIO CAMBIO (FECHA FORMATEADA EN PREVIEW) ---
+                    preview_date = (datetime.now() + timedelta(days=live_months * 30)).strftime("%d-%m-%Y")
+                    # --- FIN CAMBIO ---
+
                     create_qr_card(
                         "PREVIEW-ID-12345678",
                         template_name_for_preview, 
@@ -582,13 +590,11 @@ elif app_mode == "🛠️ Creador QR":
                         live_scopes,
                         [], # Empty restrictions
                         live_branch_list,
-                        (datetime.now() + timedelta(days=live_months * 30)).strftime("%Y-%m-%d"),
+                        preview_date, # <-- Fecha formateada
                         "0000"
                     )
-                    # --- CAMBIO: Ancho fijo para la vista previa ---
                     st.image(preview_path, caption="Vista previa generada con los datos actuales del formulario.", width=700)
                     
-                    # 3. Botón para ocultar
                     if st.button("Ocultar Vista Previa", key=f"{form_key}_hide_preview"):
                         st.session_state['show_preview'] = False
                         st.rerun() 
@@ -597,7 +603,6 @@ elif app_mode == "🛠️ Creador QR":
                     st.error(f"No se pudo generar la vista previa: {e}")
         else:
             st.caption("Presione 'Ver/Actualizar Vista Previa' para previsualizar la tarjeta con los datos del formulario.")
-        # --- FIN CAMBIO: Vista Previa (FUERA del form) ---
 
 
         # --- Display Receipt and Download (Outside Form) ---
@@ -624,7 +629,7 @@ elif app_mode == "🛠️ Creador QR":
              st.session_state['clear_form_inputs'] = False
 
 
-    # --- INICIO CAMBIO: Pestaña de Gestión de Plantilla (Rehecha para Supabase) ---
+    # --- Pestaña de Gestión de Plantilla ---
     with tab_template:
         st.header("Gestión de Plantillas de Diseño (en Supabase)")
         
@@ -651,14 +656,12 @@ elif app_mode == "🛠️ Creador QR":
                             if img.size != (CARD_WIDTH_PX, CARD_HEIGHT_PX):
                                 st.error(f"Error: La imagen debe ser de {CARD_WIDTH_PX}x{CARD_HEIGHT_PX} píxeles. La subida es de {img.size[0]}x{img.size[1]}px.")
                             else:
-                                # --- INICIO CORRECCIÓN: .getvalue() en lugar de .getbuffer() ---
                                 file_bytes = up_file.getvalue() 
                                 supabase_client.storage.from_(BUCKET_NAME).upload(
                                     path=save_name, 
-                                    file=file_bytes, # <-- Ahora son bytes
+                                    file=file_bytes, 
                                     file_options={"content-type": "image/png"}
                                 )
-                                # --- FIN CORRECCIÓN ---
                                 st.success(f"Plantilla '{template_name}' guardada en el bucket.")
                                 st.cache_data.clear() 
                                 st.rerun()
@@ -699,7 +702,6 @@ elif app_mode == "🛠️ Creador QR":
             generate_design_template(BLANK_JPG_GUIDE);
             with open(BLANK_JPG_GUIDE, "rb") as f: 
                 st.download_button("Descargar Guía (JPG)", f, os.path.basename(BLANK_JPG_GUIDE), "image/jpeg", key="dl_guide_btn")
-    # --- FIN CAMBIO: Pestaña de Gestión de Plantilla ---
 
 
 # --- MÓDULO REPORTES ---
