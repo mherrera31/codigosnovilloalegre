@@ -1,4 +1,4 @@
-# app.py (VERSIÓN FINAL - Fecha corregida a DD-MM-YYYY)
+# app.py (VERSIÓN CORREGIDA - Fuentes Bold, Color Negro, Lista Sucursales Vertical)
 import streamlit as st
 import auth
 import db_service
@@ -86,7 +86,6 @@ def create_qr_card(
 ):
     """
     Genera JPG de tarjeta.
-    CAMBIOS: Validez sobre fecha, tamaños reducidos y proporcionales.
     """
     card_img = None
     try:
@@ -104,25 +103,25 @@ def create_qr_card(
 
     draw = ImageDraw.Draw(card_img)
     
-    # --- FUENTES REAJUSTADAS (Más pequeñas y proporcionales) ---
+    # --- FUENTES ACTUALIZADAS SEGÚN TU SOLICITUD ---
     try:
-        # Validez: Reducido a 30 (antes 40)
+        # Validez: Reducido a 22 (Todo Bold)
         validez_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=22, encoding="utf-8") 
         
-        # Sucursales: Reducido a 24 (antes 32)
+        # Sucursales: Reducido a 19 (Todo Bold)
         sucursal_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=19, encoding="utf-8") 
         
-        # Consecutivo: Reducido a 55 (antes 75)
+        # Consecutivo: Reducido a 55 (Todo Bold)
         consecutive_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=55, encoding="utf-8") 
         
-        # Footer (Fecha y Términos): Reducido a 24 (antes 30)
+        # Footer (Fecha y Términos): Reducido a 24 (Todo Bold)
         footer_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=24, encoding="utf-8")  
         
-        # Web: Reducido a 24 (antes 30)
+        # Web: Reducido a 24 (Todo Bold)
         web_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=24, encoding="utf-8")
         
     except IOError:
-        st.error("Error: No se encontraron los archivos de fuente (DejaVuSans). Usando default.")
+        st.error("Error: No se encontraron los archivos de fuente (DejaVuSans-Bold.ttf). Usando default.")
         validez_font = footer_font = consecutive_font = sucursal_font = web_font = ImageFont.load_default()
 
     # Generar QR
@@ -131,16 +130,19 @@ def create_qr_card(
     # --- TEXTOS ---
     validez_text = "Validez: " + ". ".join(scopes_text_list) if scopes_text_list else ""
     
-    # La fecha ya viene formateada desde la llamada a la función
     date_text = f"Válido hasta: {expiration}"
     terms_text = "Ver Términos y Condiciones en"
     web_text = "www.restauranteelnovilloalegre.com"
     cons_text = f"{consecutive}"
     
+    # Lógica de lista de sucursales (vertical)
+    sucursales_lines = []
     if not branch_names: 
-        sucursales_text = "Válido en todas las sucursales"
+        # Dividir en dos líneas para que quede centrado y angosto
+        sucursales_lines = ["Válido para todas", "las sucursales"]
     else:
-        sucursales_text = "Sucursales: " + ", ".join(branch_names)
+        # Lista directa de nombres, uno abajo del otro
+        sucursales_lines = branch_names
 
     # --- POSICIONAMIENTO (LAYOUT) ---
 
@@ -154,59 +156,70 @@ def create_qr_card(
     CONS_X = (QR_X + (QR_SIZE_PX / 2)) - (cons_width / 2)
     CONS_Y = QR_Y + QR_SIZE_PX + 10
     
-    # 3. Sucursales (Centrado debajo del Consecutivo)
-    suc_wrap = textwrap.wrap(sucursales_text, width=30) 
-    current_suc_y = CONS_Y + 65 
+    # 3. Sucursales (Lista vertical debajo del Consecutivo)
+    # Ya no usamos textwrap aquí, usamos la lista directa
     
-    # Dibujar QR y Columna Derecha
+    # Calcular altura del consecutivo para saber donde empezar
+    cons_bbox = consecutive_font.getbbox(cons_text)
+    cons_height = cons_bbox[3] - cons_bbox[1]
+    
+    current_suc_y = CONS_Y + cons_height + 15 # Espacio debajo del consecutivo
+    
+    # Dibujar QR
     qr_scaled = qr_img.resize((QR_SIZE_PX, QR_SIZE_PX))
     card_img.paste(qr_scaled, QR_POS)
+    
+    # Dibujar Consecutivo (NEGRO 0,0,0)
     draw.text((int(CONS_X), int(CONS_Y)), cons_text, fill=(0,0,0), font=consecutive_font)
     
-    for line in suc_wrap:
+    # Dibujar Lista de Sucursales (NEGRO 0,0,0)
+    for line in sucursales_lines:
         w = sucursal_font.getlength(line)
-        x = (QR_X + (QR_SIZE_PX / 2)) - (w / 2)
-        draw.text((int(x), int(current_suc_y)), line, fill=(80,80,80), font=sucursal_font)
-        current_suc_y += 30 
+        x = (QR_X + (QR_SIZE_PX / 2)) - (w / 2) # Centrado en la columna derecha
+        draw.text((int(x), int(current_suc_y)), line, fill=(0,0,0), font=sucursal_font)
+        current_suc_y += 22 # Salto de línea pequeño (ajustado al tamaño 19)
 
-    # --- FOOTER Y VALIDEZ (Pila Central Inferior) ---
+    # --- FOOTER (Abajo al centro) ---
+    # Orden de abajo hacia arriba: Web -> Terms -> Fecha -> Validez
     
-    # Calcular alturas de líneas simples
+    # Calcular alturas
     bbox_web = web_font.getbbox(web_text); h_web = bbox_web[3] - bbox_web[1]
     bbox_terms = footer_font.getbbox(terms_text); h_terms = bbox_terms[3] - bbox_terms[1]
     bbox_date = footer_font.getbbox(date_text); h_date = bbox_date[3] - bbox_date[1]
     
-    # Posiciones Y (Construyendo hacia arriba desde el borde inferior)
+    # Posiciones Y
     Y_WEB = CARD_HEIGHT_PX - BORDER_PX - h_web
     Y_TERMS = Y_WEB - h_terms - 8 
     Y_DATE = Y_TERMS - h_date - 8
     
-    # Centrar X para el footer simple
+    # Centrar X
     X_WEB = (CARD_WIDTH_PX / 2) - (web_font.getlength(web_text) / 2)
     X_TERMS = (CARD_WIDTH_PX / 2) - (footer_font.getlength(terms_text) / 2)
     X_DATE = (CARD_WIDTH_PX / 2) - (footer_font.getlength(date_text) / 2)
     
-    # Dibujar Footer
+    # Dibujar Footer (NEGRO 0,0,0)
     draw.text((int(X_DATE), int(Y_DATE)), date_text, fill=(0,0,0), font=footer_font)
     draw.text((int(X_TERMS), int(Y_TERMS)), terms_text, fill=(0,0,0), font=footer_font)
     draw.text((int(X_WEB), int(Y_WEB)), web_text, fill=(0,0,0), font=web_font)
 
     # --- VALIDEZ (Encima de la Fecha) ---
     
+    # Envolver texto de validez (Ancho mayor 50 chars para fuente 22)
     validez_lines = textwrap.wrap(validez_text, width=50)
     
+    # Calcular altura total del bloque de validez
     bbox_val = validez_font.getbbox("A")
-    h_val_line = (bbox_val[3] - bbox_val[1]) + 10
+    h_val_line = (bbox_val[3] - bbox_val[1]) + 8
     total_h_val = len(validez_lines) * h_val_line
     
     # Posicionar el bloque DE VALIDEZ justo ARRIBA de la fecha
-    Y_START_VAL = Y_DATE - total_h_val - 20 
+    Y_START_VAL = Y_DATE - total_h_val - 15 # 15px de separación
     
-    # Dibujar Validez
+    # Dibujar Validez (NEGRO 0,0,0)
     current_y_val = Y_START_VAL
     for line in validez_lines:
         w = validez_font.getlength(line)
-        x = (CARD_WIDTH_PX / 2) - (w / 2) 
+        x = (CARD_WIDTH_PX / 2) - (w / 2) # Centrado en la tarjeta
         draw.text((int(x), int(current_y_val)), line, fill=(0,0,0), font=validez_font)
         current_y_val += h_val_line
 
@@ -509,14 +522,12 @@ elif app_mode == "🛠️ Creador QR":
                                 for entry in coupons:
                                     path = os.path.join(GENERATED_QRS_DIR, f"{entry['consecutive']:04d}.jpg")
                                     
-                                    # --- INICIO CAMBIO (FECHA FORMATEADA EN DB) ---
                                     try:
                                         # Formatear la fecha de la DB (YYYY-MM-DD) a DD-MM-YYYY
                                         date_obj = datetime.strptime(entry['expiration_date'][:10], "%Y-%m-%d")
                                         formatted_date = date_obj.strftime("%d-%m-%Y")
                                     except Exception:
                                         formatted_date = entry['expiration_date']
-                                    # --- FIN CAMBIO ---
 
                                     create_qr_card(
                                         entry['id'], 
@@ -525,7 +536,7 @@ elif app_mode == "🛠️ Creador QR":
                                         scopes_text_list, 
                                         restrictions_text_list, 
                                         branch_names_for_card, 
-                                        formatted_date, # <-- Pasamos la fecha formateada
+                                        formatted_date, 
                                         f"{entry['consecutive']:04d}"
                                     )
                                     zf.write(path, os.path.basename(path))
@@ -579,9 +590,7 @@ elif app_mode == "🛠️ Creador QR":
 
                     preview_path = os.path.join(GENERATED_QRS_DIR, "preview.jpg")
                     
-                    # --- INICIO CAMBIO (FECHA FORMATEADA EN PREVIEW) ---
                     preview_date = (datetime.now() + timedelta(days=live_months * 30)).strftime("%d-%m-%Y")
-                    # --- FIN CAMBIO ---
 
                     create_qr_card(
                         "PREVIEW-ID-12345678",
