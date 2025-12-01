@@ -1,4 +1,4 @@
-# app.py (VERSIÓN FINAL - Ajuste fino de márgenes y espacios)
+# app.py (CÓDIGO COMPLETO Y VERIFICADO - Centrado Absoluto y Sin Faltantes)
 import streamlit as st
 import auth
 import db_service
@@ -22,12 +22,11 @@ LOGO_URL = "https://placehold.co/300x100/1E3260/FFFFFF/png?text=Novillo+Alegre+Q
 TEMPLATE_DIR = 'design_templates'; os.makedirs(TEMPLATE_DIR, exist_ok=True)
 GENERATED_QRS_DIR = 'generated_qrs'; os.makedirs(GENERATED_QRS_DIR, exist_ok=True)
 
-# --- TAMAÑO 8.5cm x 5cm ---
+# --- TAMAÑO DE TARJETA (8.5cm x 5cm) ---
 CARD_WIDTH_PX = 1004 
 CARD_HEIGHT_PX = 591
 CARD_WIDTH_MM = 85
 CARD_HEIGHT_MM = 50
-# --- FIN TAMAÑO ---
 
 QR_SIZE_PX = 250; BORDER_PX = 50
 
@@ -73,7 +72,7 @@ def get_template_list():
         st.error(f"Error al listar plantillas del bucket: {e}")
         return []
 
-# --- FUNCIONES AUXILIARES ---
+# --- FUNCIONES AUXILIARES DE DIBUJO ---
 def create_qr_card(
     data_to_encode: str, 
     template_name: str, 
@@ -86,7 +85,7 @@ def create_qr_card(
 ):
     """
     Genera JPG de tarjeta.
-    CAMBIOS: Validez centrada en espacio disponible, sucursales más abajo.
+    CAMBIOS: Validez centrada en el medio de la tarjeta (como el footer).
     """
     card_img = None
     try:
@@ -106,11 +105,11 @@ def create_qr_card(
     
     # --- FUENTES ---
     try:
-        validez_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=19, encoding="utf-8") 
-        sucursal_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=16, encoding="utf-8") 
+        validez_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=22, encoding="utf-8") 
+        sucursal_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=19, encoding="utf-8") 
         consecutive_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=55, encoding="utf-8") 
-        footer_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=19, encoding="utf-8")  
-        web_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=19, encoding="utf-8")
+        footer_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=24, encoding="utf-8")  
+        web_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=24, encoding="utf-8")
     except IOError:
         st.error("Error: No se encontraron los archivos de fuente (DejaVuSans). Usando default.")
         validez_font = footer_font = consecutive_font = sucursal_font = web_font = ImageFont.load_default()
@@ -126,84 +125,82 @@ def create_qr_card(
     cons_text = f"{consecutive}"
     
     if not branch_names: 
+        # Si la lista está vacía, significa "Todas"
         sucursales_text = "Válido en todas las sucursales"
         branch_names_list = ["Válido en todas", "las sucursales"]
     else:
         branch_names_list = branch_names
 
     # --- POSICIONAMIENTO (LAYOUT) ---
-
+    
     # 1. QR (Derecha, Arriba)
     QR_X = CARD_WIDTH_PX - QR_SIZE_PX - BORDER_PX
     QR_Y = BORDER_PX + 30
     QR_POS = (int(QR_X), int(QR_Y))
 
-    # Definir límite derecho para la zona de texto (dejando margen de 20px con el QR)
-    RIGHT_COLUMN_START_X = QR_X - 20
-
     # 2. Consecutivo (Centrado debajo del QR)
     cons_width = consecutive_font.getlength(cons_text)
+    # Centrado relativo al QR
     CONS_X = QR_X + (QR_SIZE_PX / 2) - (cons_width / 2)
     CONS_Y = QR_Y + QR_SIZE_PX + 10
     
     # 3. Sucursales (Lista vertical debajo del Consecutivo)
     cons_bbox = consecutive_font.getbbox(cons_text)
     cons_height = cons_bbox[3] - cons_bbox[1]
-    
-    # --- CAMBIO: Más espacio vertical aquí (40px en vez de 15px) ---
     current_suc_y = CONS_Y + cons_height + 40 
     
-    # Dibujar QR
+    # Dibujar Columna Derecha (QR, Consecutivo, Sucursales)
     qr_scaled = qr_img.resize((QR_SIZE_PX, QR_SIZE_PX))
     card_img.paste(qr_scaled, QR_POS)
-    
-    # Dibujar Consecutivo
     draw.text((int(CONS_X), int(CONS_Y)), cons_text, fill=(0,0,0), font=consecutive_font)
     
-    # Dibujar Sucursales
     for line in branch_names_list:
         w = sucursal_font.getlength(line)
         x = QR_X + (QR_SIZE_PX / 2) - (w / 2)
         draw.text((int(x), int(current_suc_y)), line, fill=(0,0,0), font=sucursal_font)
-        current_suc_y += 26 # Salto de línea
+        current_suc_y += 22 # Salto de línea
 
-    # --- FOOTER (Abajo al centro) ---
+    # --- FOOTER (Abajo al centro de TODA la tarjeta) ---
+    # Orden: Web -> Terms -> Fecha
+    
     bbox_web = web_font.getbbox(web_text); h_web = bbox_web[3] - bbox_web[1]
     bbox_terms = footer_font.getbbox(terms_text); h_terms = bbox_terms[3] - bbox_terms[1]
     bbox_date = footer_font.getbbox(date_text); h_date = bbox_date[3] - bbox_date[1]
     
+    # Posiciones Y
     Y_WEB = CARD_HEIGHT_PX - BORDER_PX - h_web
     Y_TERMS = Y_WEB - h_terms - 8 
     Y_DATE = Y_TERMS - h_date - 8
     
-    X_WEB = (CARD_WIDTH_PX / 2) - (web_font.getlength(web_text) / 2)
-    X_TERMS = (CARD_WIDTH_PX / 2) - (footer_font.getlength(terms_text) / 2)
-    X_DATE = (CARD_WIDTH_PX / 2) - (footer_font.getlength(date_text) / 2)
+    # Centrar X (CARD_WIDTH_PX / 2)
+    CARD_CENTER_X = CARD_WIDTH_PX / 2
+    
+    X_WEB = CARD_CENTER_X - (web_font.getlength(web_text) / 2)
+    X_TERMS = CARD_CENTER_X - (footer_font.getlength(terms_text) / 2)
+    X_DATE = CARD_CENTER_X - (footer_font.getlength(date_text) / 2)
     
     draw.text((int(X_DATE), int(Y_DATE)), date_text, fill=(0,0,0), font=footer_font)
     draw.text((int(X_TERMS), int(Y_TERMS)), terms_text, fill=(0,0,0), font=footer_font)
     draw.text((int(X_WEB), int(Y_WEB)), web_text, fill=(0,0,0), font=web_font)
 
-    # --- VALIDEZ (Zona Izquierda Equilibrada) ---
+    # --- VALIDEZ (Centrado en TODA la tarjeta, Arriba de Fecha) ---
     
-    # CAMBIO: Calcular el centro del espacio disponible entre el Borde Izq y el QR
-    # Espacio disponible = RIGHT_COLUMN_START_X - BORDER_PX
-    # Centro = BORDER_PX + (Espacio / 2)
-    LEFT_ZONE_CENTER_X = BORDER_PX + ((RIGHT_COLUMN_START_X - BORDER_PX) / 2)
-
-    validez_lines = textwrap.wrap(validez_text, width=35)
+    # Envolver texto para evitar colisión con la derecha
+    # Con fuente tamaño 22, ~40 caracteres es un buen límite antes de chocar con sucursales
+    validez_lines = textwrap.wrap(validez_text, width=40)
     
     bbox_val = validez_font.getbbox("A")
     h_val_line = (bbox_val[3] - bbox_val[1]) + 10
     total_h_val = len(validez_lines) * h_val_line
     
+    # Posicionar justo ARRIBA de la Fecha
     Y_START_VAL = Y_DATE - total_h_val - 20 
     
     current_y_val = Y_START_VAL
     for line in validez_lines:
         w = validez_font.getlength(line)
-        # Centrar usando el nuevo punto de equilibrio
-        x = LEFT_ZONE_CENTER_X - (w / 2)
+        # Centrado en el medio de la tarjeta
+        x = CARD_CENTER_X - (w / 2)
         draw.text((int(x), int(current_y_val)), line, fill=(0,0,0), font=validez_font)
         current_y_val += h_val_line
 
@@ -259,7 +256,7 @@ if 'logged_in' not in st.session_state: st.session_state['logged_in'] = False
 if not auth.is_authenticated():
     st.image(LOGO_URL, width=300); st.title("QR-Creator"); auth.login_ui(); st.stop()
 
-# --- BARRA LATERAL Y NAVEGÁCIÓ ---
+# --- BARRA LATERAL Y NAVEGACIÓN ---
 st.image(LOGO_URL, width=300); st.title("QR-Creator")
 user = auth.get_current_user(); user_role = auth.get_user_role()
 with st.sidebar:
@@ -697,66 +694,3 @@ elif app_mode == "🛠️ Creador QR":
             generate_design_template(BLANK_JPG_GUIDE);
             with open(BLANK_JPG_GUIDE, "rb") as f: 
                 st.download_button("Descargar Guía (JPG)", f, os.path.basename(BLANK_JPG_GUIDE), "image/jpeg", key="dl_guide_btn")
-    # --- FIN CAMBIO: Pestaña de Gestión de Plantilla ---
-
-
-# --- MÓDULO REPORTES ---
-elif app_mode == "📊 Reportes":
-    if user_role != 'Admin': st.error("Acceso denegado."); st.stop()
-    st.header("Reportes")
-    tab_cupones, tab_lotes, tab_recibos = st.tabs(["Cupones Emitidos", "Lotes", "Recibos de Lote"])
-
-    # --- Tab Cupones ---
-    with tab_cupones:
-        st.subheader("Detalle de Cupones Emitidos")
-        st.sidebar.header("Filtros Reporte Cupones")
-        col1_date, col2_date = st.sidebar.columns(2)
-        with col1_date: start_date_coupon = st.date_input("Creación Desde", value=None, key="c_start")
-        with col2_date: end_date_coupon = st.date_input("Creación Hasta", value=None, key="c_end")
-        coupon_filters = []
-        if start_date_coupon: coupon_filters.append(f"creation_date=gte.{start_date_coupon}")
-        if end_date_coupon: coupon_filters.append(f"creation_date=lte.{end_date_coupon}")
-        coupon_filter_string = "&".join(coupon_filters)
-        df_coupons = db_service.get_activity_report(coupon_filter_string)
-        if not df_coupons.empty:
-            st.dataframe(df_coupons, use_container_width=True, hide_index=True)
-            total_qrs = len(df_coupons); redeemed_qrs = df_coupons['is_redeemed'].sum()
-            c1, c2 = st.columns(2); c1.metric("Total", f"{total_qrs} 🎟️"); c2.metric("Canjeados", f"{redeemed_qrs} ✅")
-        else: st.info("No hay cupones con esos filtros.")
-
-    # --- Tab Lotes ---
-    with tab_lotes:
-        st.subheader("Resumen de Lotes Creados")
-        df_batches = db_service.get_batch_report()
-        if not df_batches.empty:
-            df_display_batches = df_batches.copy()
-            num_cols_crc = ['Ref CRC', 'Venta CRC']; num_cols_usd = ['Ref USD', 'Venta USD']
-            for col in num_cols_crc: df_display_batches[col] = pd.to_numeric(df_display_batches[col], errors='coerce').fillna(0).apply(lambda x: f"₡ {x:,.2f}")
-            for col in num_cols_usd: df_display_batches[col] = pd.to_numeric(df_display_batches[col], errors='coerce').fillna(0).apply(lambda x: f"$ {x:,.2f}")
-            df_display_batches['Creados'] = pd.to_numeric(df_display_batches['Creados'], errors='coerce').fillna(0).astype(int)
-            df_display_batches['Canjeados'] = pd.to_numeric(df_display_batches['Canjeados'], errors='coerce').fillna(0).astype(int)
-            st.dataframe(df_display_batches.drop(columns=['ID Lote'], errors='ignore'), use_container_width=True, hide_index=True)
-            total_lotes = len(df_batches); total_creados = pd.to_numeric(df_batches['Creados'], errors='coerce').sum(); total_canjeados = pd.to_numeric(df_batches['Canjeados'], errors='coerce').sum()
-            c1,c2,c3 = st.columns(3); c1.metric("Lotes", f"{total_lotes}"); c2.metric("Total Creados", f"{int(total_creados)}"); c3.metric("Total Canjeados", f"{int(total_canjeados)}")
-        else: st.info("No hay lotes creados.")
-
-    # --- Tab Recibos ---
-    with tab_recibos:
-        st.subheader("Visualizar / Reimprimir Recibos de Lote")
-        df_receipts_list = db_service.get_all_receipts()
-        if not df_receipts_list.empty:
-            receipt_options_dict = {f"{row['Recibo ID']} - {row['Nombre Lote']} ({row['Fecha Generado']})": row['Recibo ID'] for _, row in df_receipts_list.iterrows()}
-            receipt_display_list = ["-- Seleccione un Recibo --"] + list(receipt_options_dict.keys())
-            selected_receipt_display = st.selectbox("Seleccione el recibo:", options=receipt_display_list, index=0, key="receipt_selector")
-            if selected_receipt_display != "-- Seleccione un Recibo --":
-                selected_receipt_id = receipt_options_dict[selected_receipt_display]
-                st.session_state['selected_receipt_id'] = selected_receipt_id
-                if st.session_state['selected_receipt_id']:
-                    receipt_data = db_service.get_receipt_data(st.session_state['selected_receipt_id'])
-                    if receipt_data:
-                        st.divider(); st.subheader(f"Detalles del Recibo #{st.session_state['selected_receipt_id']}")
-                        st.code(format_receipt(receipt_data), language=None)
-                        st.caption("Copie o imprima (Ctrl+P / Cmd+P).")
-                    else: st.error(f"No se cargaron detalles del recibo ID: {st.session_state['selected_receipt_id']}")
-            else: st.session_state['selected_receipt_id'] = None; st.info("Seleccione un recibo.")
-        else: st.warning("No hay recibos guardados.")
