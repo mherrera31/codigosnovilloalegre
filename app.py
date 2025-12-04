@@ -1,4 +1,4 @@
-# app.py (VERSIÓN CON ROL CONTABILIDAD - Acceso a Reportes Habilitado)
+# app.py (VERSIÓN FINAL - Hora Costa Rica en Vista Previa)
 import streamlit as st
 import auth
 import db_service
@@ -8,7 +8,8 @@ import qrcode
 from PIL import Image, ImageDraw, ImageFont
 import uuid
 import os
-from datetime import datetime, timedelta
+# --- CAMBIO: Importar timezone ---
+from datetime import datetime, timedelta, timezone
 import pandas as pd
 import zipfile
 import io
@@ -21,6 +22,9 @@ st.set_page_config(page_title="Sistema QR Novillo Alegre", layout="wide")
 LOGO_URL = "https://placehold.co/300x100/1E3260/FFFFFF/png?text=Novillo+Alegre+QR"
 TEMPLATE_DIR = 'design_templates'; os.makedirs(TEMPLATE_DIR, exist_ok=True)
 GENERATED_QRS_DIR = 'generated_qrs'; os.makedirs(GENERATED_QRS_DIR, exist_ok=True)
+
+# --- CAMBIO: Definir Zona Horaria Costa Rica (UTC-6) ---
+CR_TIMEZONE = timezone(timedelta(hours=-6))
 
 # --- TAMAÑO 8.5cm x 5cm ---
 CARD_WIDTH_PX = 1004 
@@ -105,8 +109,8 @@ def create_qr_card(
     
     # --- FUENTES ---
     try:
-        validez_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=30, encoding="utf-8") 
-        sucursal_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=24, encoding="utf-8") 
+        validez_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=22, encoding="utf-8") 
+        sucursal_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=19, encoding="utf-8") 
         consecutive_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=55, encoding="utf-8") 
         footer_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=24, encoding="utf-8")  
         web_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=24, encoding="utf-8")
@@ -125,6 +129,7 @@ def create_qr_card(
     cons_text = f"{consecutive}"
     
     if not branch_names: 
+        # Si la lista está vacía, significa "Todas"
         sucursales_text = "Válido en todas las sucursales"
         branch_names_list = ["Válido en todas", "las sucursales"]
     else:
@@ -170,24 +175,21 @@ def create_qr_card(
     Y_TERMS = Y_WEB - h_terms - 8 
     Y_DATE = Y_TERMS - h_date - 8
     
-    X_WEB = (CARD_WIDTH_PX / 2) - (web_font.getlength(web_text) / 2)
-    X_TERMS = (CARD_WIDTH_PX / 2) - (footer_font.getlength(terms_text) / 2)
-    X_DATE = (CARD_WIDTH_PX / 2) - (footer_font.getlength(date_text) / 2)
+    X_WEB = LEFT_ZONE_CENTER_X - (web_font.getlength(web_text) / 2)
+    X_TERMS = LEFT_ZONE_CENTER_X - (footer_font.getlength(terms_text) / 2)
+    X_DATE = LEFT_ZONE_CENTER_X - (footer_font.getlength(date_text) / 2)
     
     draw.text((int(X_DATE), int(Y_DATE)), date_text, fill=(0,0,0), font=footer_font)
     draw.text((int(X_TERMS), int(Y_TERMS)), terms_text, fill=(0,0,0), font=footer_font)
     draw.text((int(X_WEB), int(Y_WEB)), web_text, fill=(0,0,0), font=web_font)
 
     # --- VALIDEZ (Centrado en zona izquierda) ---
-    
-    # Envolver texto de validez
     validez_lines = textwrap.wrap(validez_text, width=35)
     
     bbox_val = validez_font.getbbox("A")
     h_val_line = (bbox_val[3] - bbox_val[1]) + 10
     total_h_val = len(validez_lines) * h_val_line
     
-    # Posicionar justo ARRIBA de la Fecha
     Y_START_VAL = Y_DATE - total_h_val - 20 
     
     current_y_val = Y_START_VAL
@@ -261,15 +263,12 @@ with st.sidebar:
         if user_role == 'Admin': 
             menu_options.extend(["🔑 Gestión de Usuarios", "⚙️ Configuración", "📊 Reportes"])
         
-        # Acceso para Creator
         if user_role in ['Admin', 'Creator']: 
             menu_options.append("🛠️ Creador QR")
         
-        # Acceso para Cashier
         if user_role in ['Admin', 'Cashier']: 
             menu_options.append("📲 Escáner")
 
-        # Acceso para Contabilidad (Solo Reportes)
         if user_role == 'Contabilidad':
             menu_options.append("📊 Reportes")
         
@@ -577,7 +576,9 @@ elif app_mode == "🛠️ Creador QR":
 
                     preview_path = os.path.join(GENERATED_QRS_DIR, "preview.jpg")
                     
-                    preview_date = (datetime.now() + timedelta(days=live_months * 30)).strftime("%d-%m-%Y")
+                    # --- INICIO CAMBIO: Usar CR_TIMEZONE para la vista previa ---
+                    preview_date = (datetime.now(CR_TIMEZONE) + timedelta(days=live_months * 30)).strftime("%d-%m-%Y")
+                    # --- FIN CAMBIO ---
 
                     create_qr_card(
                         "PREVIEW-ID-12345678",
