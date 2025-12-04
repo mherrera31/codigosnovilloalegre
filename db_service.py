@@ -1,4 +1,4 @@
-# db_service.py (VERSIÓN CORREGIDA - Sin 'key' en Expander de Config)
+# db_service.py (VERSIÓN FINAL - Hora Costa Rica UTC-6)
 import requests
 import streamlit as st
 import pandas as pd
@@ -6,8 +6,11 @@ import json
 import uuid
 import auth
 from db_config import POSTGREST_ENDPOINT, get_headers
-from datetime import datetime, timedelta, date
+# --- CAMBIO: Importar timezone para manejar UTC-6 ---
+from datetime import datetime, timedelta, date, timezone
 
+# --- CAMBIO: Definir Zona Horaria Costa Rica (UTC-6) ---
+CR_TIMEZONE = timezone(timedelta(hours=-6))
 
 # Cache branch names for mapping in reports
 @st.cache_data(ttl=300) # Cache for 5 minutes
@@ -232,8 +235,12 @@ def create_coupon_batch(
         allowed_branch_ids = [str(branch_options[name]) for name in branch_names if name in branch_options] # Ensure IDs are strings
         start_consecutive = get_next_consecutive(); end_consecutive = start_consecutive + count - 1
         batch_uuid = str(uuid.uuid4())
-        expiration_date = (datetime.now() + timedelta(days=months_valid * 30)).strftime("%Y-%m-%d") # Approx 30 days/month
-        current_timestamp_iso = datetime.now().isoformat() # Use ISO format
+        
+        # --- CAMBIO: Usar Hora Costa Rica para el vencimiento y creación ---
+        now_cr = datetime.now(CR_TIMEZONE)
+        expiration_date = (now_cr + timedelta(days=months_valid * 30)).strftime("%Y-%m-%d") 
+        current_timestamp_iso = now_cr.isoformat() 
+        # --- FIN CAMBIO ---
 
         # 2. Calcular valores
         total_ref_crc = round(value_crc * count, 2); total_ref_usd = round(value_usd * count, 2)
@@ -242,10 +249,11 @@ def create_coupon_batch(
         total_sale_crc = round(total_ref_crc - total_disc_crc, 2); total_sale_usd = round(total_ref_usd - total_disc_usd, 2)
         sale_basis_crc = round(value_crc - disc_crc, 2); sale_basis_usd = round(value_usd - disc_usd, 2)
 
-        # 3. GENERAR BATCH NAME (Siempre autogenerado con Asociado)
+        # 3. GENERAR BATCH NAME (Siempre autogenerado con Asociado y Hora CR)
         base_name_part = f"{promo_data.get('type_name', 'Lote')}"
         base_name = f"{asociado_comprador.strip()}_{base_name_part}"
-        final_batch_name = f"{base_name}_{datetime.now().strftime('%Y%m%d%H%M')}_{batch_uuid[:4]}"
+        # Usamos now_cr para el nombre del archivo
+        final_batch_name = f"{base_name}_{now_cr.strftime('%Y%m%d%H%M')}_{batch_uuid[:4]}"
 
         # 4. Insertar Lote (Batches)
         batch_payload = {
@@ -372,8 +380,13 @@ def get_batch_report(filters: str = None):
         df_b['Creados'] = df_b['coupons'].apply(lambda x: x[0]['count'] if isinstance(x, list) and x and 'count' in x[0] else None)
         df_b['Creados'] = df_b['Creados'].fillna(pd.to_numeric(df_b['consecutive_end'], errors='coerce') - pd.to_numeric(df_b['consecutive_start'], errors='coerce') + 1).fillna(0).astype(int)
         df_b['Canjeados'] = df_b['id'].map(redeemed_counts).fillna(0).astype(int)
-        today = date.today(); df_b['exp_date'] = pd.to_datetime(df_b['expiration_date'], errors='coerce').dt.date
-        df_b['Vencido?'] = (df_b['exp_date'] < today).fillna(False) # Handle NaT dates
+        
+        # --- CAMBIO: Comparar Vencimiento con fecha CR ---
+        today_cr = datetime.now(CR_TIMEZONE).date() # Usar fecha local CR
+        df_b['exp_date'] = pd.to_datetime(df_b['expiration_date'], errors='coerce').dt.date
+        df_b['Vencido?'] = (df_b['exp_date'] < today_cr).fillna(False) 
+        # --- FIN CAMBIO ---
+
         df_b['Creado'] = pd.to_datetime(df_b['creation_date'], errors='coerce').dt.strftime('%Y-%m-%d')
         df_b['Vence'] = pd.to_datetime(df_b['expiration_date'], errors='coerce').dt.strftime('%Y-%m-%d')
         # Ensure numeric types for formatting
