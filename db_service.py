@@ -669,3 +669,51 @@ def render_config_management():
                             if st.session_state[confirm_key]:
                                 if delete_entry('restrictions', restriction['id']): st.success("Eliminado."); st.session_state[confirm_key] = False; st.rerun()
         else: st.info("No hay restricciones para editar/eliminar.")
+
+# --- AGREGAR AL FINAL DE db_service.py ---
+
+def get_batch_details_for_reprint(batch_id: str):
+    """
+    Obtiene todos los datos necesarios para regenerar las imágenes QR de un lote existente.
+    Trae cupones, scopes y restrictions.
+    """
+    token = st.session_state.get('token')
+    # Consulta compleja para traer el cupón con sus relaciones
+    select_query = (
+        "id,consecutive,expiration_date,branch_permissions,"
+        "coupon_scopes(validity_scopes(scope_name)),"
+        "coupon_restrictions(restrictions(restriction_description))"
+    )
+    url = f"{POSTGREST_ENDPOINT}/coupons?batch_id=eq.{batch_id}&select={select_query}&order=consecutive.asc"
+    
+    try:
+        response = requests.get(url, headers=get_headers(token))
+        response.raise_for_status()
+        data = response.json()
+        return data
+    except Exception as e:
+        st.error(f"Error al obtener detalles del lote para reimpresión: {e}")
+        return []
+
+def delete_batch(batch_id: str):
+    """
+    Elimina un lote completo.
+    NOTA: Supabase debe tener 'ON DELETE CASCADE' configurado en las FK.
+    Si no, habría que borrar tablas hijas manualmente primero.
+    Intentamos borrar el Batch padre.
+    """
+    token = st.session_state.get('token')
+    if not token: return False
+    
+    # 1. Borrar el Recibo asociado (Opcional, si no hay cascada)
+    delete_entry('batch_receipts', batch_id, 'batch_id')
+    
+    # 2. Borrar el Lote (Esto debería borrar los cupones en cascada)
+    url = f"{POSTGREST_ENDPOINT}/batches?id=eq.{batch_id}"
+    try:
+        response = requests.delete(url, headers=get_headers(token))
+        response.raise_for_status()
+        return response.status_code == 204
+    except Exception as e:
+        st.error(f"Error al eliminar el lote: {e}")
+        return False
