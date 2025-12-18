@@ -1,4 +1,4 @@
-# app.py (VERSIÓN FINAL - Hora Costa Rica en Vista Previa)
+# app.py (VERSIÓN CON MÓDULO GESTIÓN DE LOTES - REIMPRESIÓN Y BORRADO)
 import streamlit as st
 import auth
 import db_service
@@ -8,8 +8,7 @@ import qrcode
 from PIL import Image, ImageDraw, ImageFont
 import uuid
 import os
-# --- CAMBIO: Importar timezone ---
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 import pandas as pd
 import zipfile
 import io
@@ -22,9 +21,6 @@ st.set_page_config(page_title="Sistema QR Novillo Alegre", layout="wide")
 LOGO_URL = "https://placehold.co/300x100/1E3260/FFFFFF/png?text=Novillo+Alegre+QR"
 TEMPLATE_DIR = 'design_templates'; os.makedirs(TEMPLATE_DIR, exist_ok=True)
 GENERATED_QRS_DIR = 'generated_qrs'; os.makedirs(GENERATED_QRS_DIR, exist_ok=True)
-
-# --- CAMBIO: Definir Zona Horaria Costa Rica (UTC-6) ---
-CR_TIMEZONE = timezone(timedelta(hours=-6))
 
 # --- TAMAÑO 8.5cm x 5cm ---
 CARD_WIDTH_PX = 1004 
@@ -109,8 +105,8 @@ def create_qr_card(
     
     # --- FUENTES ---
     try:
-        validez_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=22, encoding="utf-8") 
-        sucursal_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=19, encoding="utf-8") 
+        validez_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=30, encoding="utf-8") 
+        sucursal_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=24, encoding="utf-8") 
         consecutive_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=55, encoding="utf-8") 
         footer_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=24, encoding="utf-8")  
         web_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=24, encoding="utf-8")
@@ -129,7 +125,6 @@ def create_qr_card(
     cons_text = f"{consecutive}"
     
     if not branch_names: 
-        # Si la lista está vacía, significa "Todas"
         sucursales_text = "Válido en todas las sucursales"
         branch_names_list = ["Válido en todas", "las sucursales"]
     else:
@@ -175,9 +170,11 @@ def create_qr_card(
     Y_TERMS = Y_WEB - h_terms - 8 
     Y_DATE = Y_TERMS - h_date - 8
     
-    X_WEB = LEFT_ZONE_CENTER_X - (web_font.getlength(web_text) / 2)
-    X_TERMS = LEFT_ZONE_CENTER_X - (footer_font.getlength(terms_text) / 2)
-    X_DATE = LEFT_ZONE_CENTER_X - (footer_font.getlength(date_text) / 2)
+    CARD_CENTER_X = CARD_WIDTH_PX / 2
+    
+    X_WEB = CARD_CENTER_X - (web_font.getlength(web_text) / 2)
+    X_TERMS = CARD_CENTER_X - (footer_font.getlength(terms_text) / 2)
+    X_DATE = CARD_CENTER_X - (footer_font.getlength(date_text) / 2)
     
     draw.text((int(X_DATE), int(Y_DATE)), date_text, fill=(0,0,0), font=footer_font)
     draw.text((int(X_TERMS), int(Y_TERMS)), terms_text, fill=(0,0,0), font=footer_font)
@@ -259,9 +256,8 @@ with st.sidebar:
     if user_role:
         st.success(f"**Usuario:** {st.session_state.get('username', 'N/A')}\n**Rol:** {user_role}")
         menu_options = ["🏠 Dashboard"]
-        # --- CAMBIOS DE ROLES ---
         if user_role == 'Admin': 
-            menu_options.extend(["🔑 Gestión de Usuarios", "⚙️ Configuración", "📊 Reportes"])
+            menu_options.extend(["🔑 Gestión de Usuarios", "⚙️ Configuración", "📊 Reportes", "📦 Gestión de Lotes"])
         
         if user_role in ['Admin', 'Creator']: 
             menu_options.append("🛠️ Creador QR")
@@ -701,6 +697,118 @@ elif app_mode == "🛠️ Creador QR":
             generate_design_template(BLANK_JPG_GUIDE);
             with open(BLANK_JPG_GUIDE, "rb") as f: 
                 st.download_button("Descargar Guía (JPG)", f, os.path.basename(BLANK_JPG_GUIDE), "image/jpeg", key="dl_guide_btn")
+
+
+# --- MÓDULO GESTIÓN DE LOTES (Nuevo) ---
+elif app_mode == "📦 Gestión de Lotes":
+    if user_role != 'Admin': st.error("Acceso denegado."); st.stop()
+    st.header("Gestión Administrativa de Lotes")
+    st.markdown("Desde aquí puede **volver a descargar los QRs** de un lote existente o **eliminarlo** permanentemente.")
+
+    # 1. Obtener lista de lotes
+    df_batches = db_service.get_batch_report()
+    
+    if not df_batches.empty:
+        # Mostrar tabla resumen
+        st.dataframe(df_batches, use_container_width=True, hide_index=True)
+        st.divider()
+
+        # Selector de lote
+        batch_options = {f"{row['Nombre Lote']} (Creado: {row['Creado']})": row['ID Lote'] for _, row in df_batches.iterrows()}
+        selected_batch_name = st.selectbox("Seleccione un Lote para gestionar:", ["-- Seleccione --"] + list(batch_options.keys()))
+
+        if selected_batch_name != "-- Seleccione --":
+            selected_batch_id = batch_options[selected_batch_name]
+            st.info(f"Lote seleccionado ID: {selected_batch_id}")
+
+            col_actions1, col_actions2 = st.columns(2)
+
+            # --- ACCIÓN 1: RE-DESCARGAR ---
+            with col_actions1:
+                st.subheader("📥 Re-descargar QRs")
+                st.markdown("Genere nuevamente el archivo ZIP con los códigos QR originales.")
+                
+                # Selector de plantilla para la regeneración
+                template_list_regen = ["Fondo Blanco"] + get_template_list()
+                selected_template_regen = st.selectbox("Plantilla para reimpresión:", template_list_regen, key="regen_template")
+
+                if st.button("Generar ZIP de Reimpresión", type="primary"):
+                    with st.spinner("Recuperando datos y generando imágenes..."):
+                        # 1. Obtener datos detallados del lote
+                        coupons_data = db_service.get_batch_details_for_reprint(selected_batch_id)
+                        
+                        if coupons_data:
+                            # 2. Generar imágenes en memoria
+                            zip_buffer_regen = io.BytesIO()
+                            template_name_regen = None if selected_template_regen == "Fondo Blanco" else selected_template_regen
+
+                            with zipfile.ZipFile(zip_buffer_regen, 'w', zipfile.ZIP_DEFLATED) as zf:
+                                for coupon in coupons_data:
+                                    # Parsear scopes
+                                    scopes_list = [s['validity_scopes']['scope_name'] for s in coupon.get('coupon_scopes', []) if s.get('validity_scopes')]
+                                    # Parsear restrictions (aunque no se usen en el diseño actual, por consistencia)
+                                    restric_list = [r['restrictions']['restriction_description'] for r in coupon.get('coupon_restrictions', []) if r.get('restrictions')]
+                                    
+                                    # Parsear Branches (Ids a Nombres) - Esto es un poco más complejo porque la DB guarda IDs en el array
+                                    # Simplificación: Si es null es "Todas". Si tiene IDs, necesitamos mapearlos.
+                                    # Para reimpresión rápida, asumiremos "Todas" si es null, o intentaremos resolver nombres si tenemos el mapa.
+                                    branch_ids = coupon.get('branch_permissions')
+                                    branch_names_regen = []
+                                    if branch_ids:
+                                        all_branches = db_service.get_branches()
+                                        b_map = {str(b['id']): b['name'] for b in all_branches}
+                                        branch_names_regen = [b_map.get(str(bid), "Sucursal") for bid in branch_ids]
+
+                                    # Fecha
+                                    try:
+                                        date_obj = datetime.strptime(coupon['expiration_date'][:10], "%Y-%m-%d")
+                                        fmt_date = date_obj.strftime("%d-%m-%Y")
+                                    except: fmt_date = coupon['expiration_date']
+
+                                    # Path temporal
+                                    fname = f"{coupon['consecutive']:04d}.jpg"
+                                    path = os.path.join(GENERATED_QRS_DIR, fname)
+
+                                    create_qr_card(
+                                        coupon['id'],
+                                        template_name_regen,
+                                        path,
+                                        scopes_list,
+                                        restric_list,
+                                        branch_names_regen,
+                                        fmt_date,
+                                        f"{coupon['consecutive']:04d}"
+                                    )
+                                    zf.write(path, fname)
+                            
+                            zip_buffer_regen.seek(0)
+                            st.success("✅ Archivo generado exitosamente.")
+                            st.download_button(
+                                label="⬇️ Descargar ZIP Ahora",
+                                data=zip_buffer_regen,
+                                file_name=f"REIMPRESION_Lote_{selected_batch_id[:4]}.zip",
+                                mime="application/zip"
+                            )
+                        else:
+                            st.error("No se encontraron cupones para este lote.")
+
+            # --- ACCIÓN 2: ELIMINAR ---
+            with col_actions2:
+                st.subheader("🗑️ Eliminar Lote")
+                st.warning("⚠️ ESTA ACCIÓN ES IRREVERSIBLE. Borrará el lote, todos sus cupones y el historial de canjes.")
+                
+                confirm_del_batch = st.checkbox("Estoy seguro de que quiero eliminar este lote.", key="confirm_del_batch")
+                
+                if st.button("Eliminar Lote Definitivamente", type="secondary", disabled=not confirm_del_batch):
+                    with st.spinner("Eliminando registros..."):
+                        if db_service.delete_batch(selected_batch_id):
+                            st.success("Lote eliminado correctamente.")
+                            st.rerun()
+                        else:
+                            st.error("Hubo un error al eliminar el lote.")
+
+    else:
+        st.info("No hay lotes registrados para gestionar.")
 
 
 # --- MÓDULO REPORTES ---
