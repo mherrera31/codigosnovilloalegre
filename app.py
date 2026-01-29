@@ -831,39 +831,62 @@ elif app_mode == "📊 Reportes":
         coupon_filter_string = "&".join(coupon_filters)
         df_coupons = db_service.get_activity_report(coupon_filter_string)
         if not df_coupons.empty:
-            # --- INICIO DEL BLOQUE CORREGIDO ---
             from datetime import datetime
 
-            # 1. Calcular Totales Básicos
-            total_qrs = len(df_coupons)
-            redeemed_qrs = df_coupons['Canjeado'].sum() 
-            sin_canjear_qrs = total_qrs - redeemed_qrs
-
-            # 2. Calcular Vencidos
-            # Convertimos la fecha texto a objeto fecha temporalmente
+            # --- 1. CÁLCULOS DE MÉTRICAS ---
+            # Convertimos la fecha a objeto real para poder comparar
             df_coupons['temp_fecha_venc'] = pd.to_datetime(df_coupons['Fecha de Vencimiento'], errors='coerce')
             
-            # Filtramos: NO canjeado Y fecha menor a hoy
+            total_qrs = len(df_coupons)
+            redeemed_qrs = df_coupons['Canjeado'].sum()
+            sin_canjear_qrs = total_qrs - redeemed_qrs
+            
+            # Calculamos vencidos usando la columna temporal
             vencidos_qrs = len(df_coupons[
                 (df_coupons['Canjeado'] == False) & 
                 (df_coupons['temp_fecha_venc'] < datetime.now())
             ])
-            
-            # Limpiamos columna temporal
-            df_coupons = df_coupons.drop(columns=['temp_fecha_venc'])
 
-            # 3. Mostrar las 4 Métricas
+            # Mostramos las métricas arriba
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("Total", f"{total_qrs} 🎟️")
             c2.metric("Canjeados", f"{redeemed_qrs} ✅")
             c3.metric("Sin Canjear", f"{sin_canjear_qrs} ⏳")
             c4.metric("Vencidos", f"{vencidos_qrs} ⚠️")
-            
-            # 4. Mostrar la tabla
             st.divider()
-            st.dataframe(df_coupons, hide_index=True)
-            # --- FIN DEL BLOQUE CORREGIDO ---
+
+            # --- 2. CREAR COLUMNA 'ESTADO' Y COLOREAR ---
             
+            # Función para definir el texto de la columna Estado
+            def obtener_estado(row):
+                if row['Canjeado']:
+                    return "Canjeado"
+                elif row['temp_fecha_venc'] < datetime.now():
+                    return "Vencido"
+                else:
+                    return "Activo"
+
+            # Aplicamos la función fila por fila
+            df_coupons['Estado'] = df_coupons.apply(obtener_estado, axis=1)
+
+            # Reordenamos para que 'Estado' salga de primero (Opcional, se ve mejor)
+            cols = ['Estado'] + [c for c in df_coupons.columns if c not in ['Estado', 'temp_fecha_venc']]
+            df_final_view = df_coupons[cols].copy()
+
+            # Función para pintar de AMARILLO las filas vencidas
+            def colorear_filas(row):
+                if row['Estado'] == 'Vencido':
+                    # Fondo amarillo claro (#fff9c4) y texto negro para que se lea bien en modo oscuro
+                    return ['background-color: #fff9c4; color: black'] * len(row)
+                elif row['Estado'] == 'Canjeado':
+                    # (Opcional) Fondo verde muy suave para los canjeados
+                    return ['background-color: #d1e7dd; color: black'] * len(row)
+                else:
+                    return [''] * len(row)
+
+            # Mostrar la tabla con estilo
+            st.dataframe(df_final_view.style.apply(colorear_filas, axis=1), hide_index=True)
+
         else:
             st.info("No hay cupones con esos filtros.")
 
