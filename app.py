@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 import pandas as pd
 import zipfile
 import io
-import textwrap 
+import textwrap
 from supabase import create_client, Client
 from db_config import SUPABASE_URL 
 
@@ -832,8 +832,33 @@ elif app_mode == "📊 Reportes":
         df_coupons = db_service.get_activity_report(coupon_filter_string)
         if not df_coupons.empty:
             st.dataframe(df_coupons, hide_index=True)
-            total_qrs = len(df_coupons); redeemed_qrs = df_coupons['Canjeado'].sum()
-            c1, c2 = st.columns(2); c1.metric("Total", f"{total_qrs} 🎟️"); c2.metric("Canjeados", f"{redeemed_qrs} ✅")
+            total_qrs = len(df_coupons)
+                    redeemed_qrs = df_coupons['Canjeado'].sum() # Suma los Verdaderos
+                    sin_canjear_qrs = total_qrs - redeemed_qrs  # Resta simple
+
+                    # 2. Calcular Vencidos
+                    # Primero convertimos la fecha (que es texto) a objeto de fecha para poder comparar
+                    df_coupons['temp_fecha_venc'] = pd.to_datetime(df_coupons['Fecha de Vencimiento'], errors='coerce')
+                    
+                    # Filtramos: Que NO esté canjeado Y que la fecha sea menor a hoy
+                    vencidos_qrs = len(df_coupons[
+                        (df_coupons['Canjeado'] == False) & 
+                        (df_coupons['temp_fecha_venc'] < datetime.now())
+                    ])
+                    
+                    # (Opcional) Borramos la columna temporal para que no salga en la tabla
+                    df_coupons = df_coupons.drop(columns=['temp_fecha_venc'])
+
+                    # 3. Mostrar las 4 Métricas en columnas
+                    c1, c2, c3, c4 = st.columns(4)
+                    c1.metric("Total", f"{total_qrs} 🎟️")
+                    c2.metric("Canjeados", f"{redeemed_qrs} ✅")
+                    c3.metric("Sin Canjear", f"{sin_canjear_qrs} ⏳")
+                    c4.metric("Vencidos", f"{vencidos_qrs} ⚠️")
+                    
+                    # 4. Mostrar la tabla
+                    st.divider()
+                    st.dataframe(df_coupons, hide_index=True)
         else: st.info("No hay cupones con esos filtros.")
 
     # --- Tab Lotes ---
