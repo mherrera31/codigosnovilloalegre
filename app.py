@@ -831,8 +831,8 @@ elif app_mode == "📊 Reportes":
         coupon_filter_string = "&".join(coupon_filters)
         df_coupons = db_service.get_activity_report(coupon_filter_string)
         if not df_coupons.empty:
-            st.dataframe(df_coupons, use_container_width=True, hide_index=True)
-            total_qrs = len(df_coupons); redeemed_qrs = df_coupons['is_redeemed'].sum()
+            st.dataframe(df_coupons, hide_index=True)
+            total_qrs = len(df_coupons); redeemed_qrs = df_coupons['Canjeado'].sum()
             c1, c2 = st.columns(2); c1.metric("Total", f"{total_qrs} 🎟️"); c2.metric("Canjeados", f"{redeemed_qrs} ✅")
         else: st.info("No hay cupones con esos filtros.")
 
