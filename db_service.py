@@ -307,7 +307,7 @@ def get_activity_report(filters: str):
     # Añadir branch_permissions
     select_params = (
         "id,consecutive,is_redeemed,redemption_date,invoice_number,creation_date,expiration_date,"
-        "base_value_colones,base_value_dolares,branch_permissions," # <-- Columna añadida
+        "base_value_colones,base_value_dolares,branch_permissions," 
         "batch:batch_id(id,batch_name,sale_value_basis_crc,sale_value_basis_usd,type:types(type_name),creator:created_by_user_id(username)),"
         "branch:redemption_branch_id(name),"
         "user:redeemed_by_user_id(username)"
@@ -343,27 +343,43 @@ def get_activity_report(filters: str):
             return "Error Formato"
         df['Sucursales Permitidas'] = df['branch_permissions'].apply(map_branch_permissions)
 
-
         # Formatear fechas
         for col in ['creation_date', 'expiration_date', 'redemption_date']:
              if col in df.columns: df[col] = pd.to_datetime(df[col], errors='coerce').dt.strftime('%Y-%m-%d %H:%M')
 
-        # Orden final
+        # Orden final interno
         column_order = [
             'id', 'consecutive', 'is_redeemed', 'creation_date', 'expiration_date',
             'base_value_colones', 'base_value_dolares',
             'Valor Pagado Cupón CRC', 'Valor Pagado Cupón USD',
-            'Sucursales Permitidas', # <-- Nueva columna
+            'Sucursales Permitidas',
             'Tipo/Campaña', 'Lote', 'Creador Lote',
             'redemption_date', 'invoice_number', 'Sucursal Canje', 'Canjeado Por'
         ]
-        final_columns = [c for c in column_order if c in df.columns]; return df[final_columns]
+        
+        # Filtramos columnas existentes
+        final_columns = [c for c in column_order if c in df.columns]
+        df_final = df[final_columns]
+
+        # --- CAMBIO SOLICITADO: Renombrar columnas para visualización ---
+        rename_map = {
+            'is_redeemed': 'Canjeado',
+            'creation_date': 'Fecha de Creación',
+            'expiration_date': 'Fecha de Vencimiento',
+            'base_value_colones': 'Valor Cupón Colones',
+            'base_value_dolares': 'Valor Cupón Dólares',
+            'Valor Pagado Cupón CRC': 'Valor Real Pagado CRC',
+            'Valor Pagado Cupón USD': 'Valor Real Pagado USD',
+            'Lote': 'Nombre de Lote'
+        }
+        
+        return df_final.rename(columns=rename_map)
 
     except requests.exceptions.HTTPError as e:
         try: error = e.response.json().get('message', str(e.response.text))
         except: error = str(e); st.error(f"Error reporte cupones (HTTP): {error}"); return pd.DataFrame()
     except Exception as e: st.error(f"Error reporte cupones: {e}"); return pd.DataFrame()
-
+        
 def get_batch_report(filters: str = None):
     """Obtiene el reporte resumen de lotes."""
     token = st.session_state.get('token');
