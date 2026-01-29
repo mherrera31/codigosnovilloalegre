@@ -833,21 +833,20 @@ elif app_mode == "📊 Reportes":
         if not df_coupons.empty:
             from datetime import datetime
 
-            # --- 1. CÁLCULOS DE MÉTRICAS ---
-            # Convertimos la fecha a objeto real para poder comparar
+            # --- 1. CÁLCULOS ---
             df_coupons['temp_fecha_venc'] = pd.to_datetime(df_coupons['Fecha de Vencimiento'], errors='coerce')
             
             total_qrs = len(df_coupons)
+            # Usamos la columna booleana original para sumar antes de convertirla a texto
             redeemed_qrs = df_coupons['Canjeado'].sum()
             sin_canjear_qrs = total_qrs - redeemed_qrs
             
-            # Calculamos vencidos usando la columna temporal
             vencidos_qrs = len(df_coupons[
                 (df_coupons['Canjeado'] == False) & 
                 (df_coupons['temp_fecha_venc'] < datetime.now())
             ])
 
-            # Mostramos las métricas arriba
+            # Métricas
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("Total", f"{total_qrs} 🎟️")
             c2.metric("Canjeados", f"{redeemed_qrs} ✅")
@@ -855,36 +854,40 @@ elif app_mode == "📊 Reportes":
             c4.metric("Vencidos", f"{vencidos_qrs} ⚠️")
             st.divider()
 
-            # --- 2. CREAR COLUMNA 'ESTADO' Y COLOREAR ---
+            # --- 2. PREPARACIÓN VISUAL ---
             
-            # Función para definir el texto de la columna Estado
             def obtener_estado(row):
-                if row['Canjeado']:
-                    return "Canjeado"
-                elif row['temp_fecha_venc'] < datetime.now():
-                    return "Vencido"
-                else:
-                    return "Activo"
+                if row['Canjeado']: return "Canjeado"
+                elif row['temp_fecha_venc'] < datetime.now(): return "Vencido"
+                else: return "Activo"
 
-            # Aplicamos la función fila por fila
             df_coupons['Estado'] = df_coupons.apply(obtener_estado, axis=1)
 
-            # Reordenamos para que 'Estado' salga de primero (Opcional, se ve mejor)
-            cols = ['Estado'] + [c for c in df_coupons.columns if c not in ['Estado', 'temp_fecha_venc']]
+            # Convertir bool a Texto (para que se vea NEGRO sobre el verde)
+            df_coupons['Canjeado'] = df_coupons['Canjeado'].apply(lambda x: "SÍ ✅" if x else "NO")
+
+            # --- CAMBIO AQUÍ: Agregamos 'id' a la lista de exclusión ---
+            # Excluimos: Estado (porque lo ponemos manual al inicio), Canjeado (igual), fecha temp y el ID
+            cols_to_exclude = ['Estado', 'Canjeado', 'temp_fecha_venc', 'id'] 
+            
+            # Construimos la vista final: Estado + Canjeado + El resto (menos las excluidas)
+            cols = ['Estado', 'Canjeado'] + [c for c in df_coupons.columns if c not in cols_to_exclude]
             df_final_view = df_coupons[cols].copy()
 
-            # Función para pintar de AMARILLO las filas vencidas
+            # --- 3. ESTILOS ---
             def colorear_filas(row):
                 if row['Estado'] == 'Vencido':
-                    # Fondo amarillo claro (#fff9c4) y texto negro para que se lea bien en modo oscuro
-                    return ['background-color: #fff9c4; color: black'] * len(row)
+                    # AMARILLO ORO (#ffd700) con TEXTO NEGRO
+                    return ['background-color: #ffd700; color: black'] * len(row)
+                
                 elif row['Estado'] == 'Canjeado':
-                    # (Opcional) Fondo verde muy suave para los canjeados
-                    return ['background-color: #d1e7dd; color: black'] * len(row)
+                    # VERDE LIMA PURO (#32CD32) con TEXTO NEGRO y NEGRITA
+                    return ['background-color: #32CD32; color: black; font-weight: bold'] * len(row)
+                
                 else:
                     return [''] * len(row)
 
-            # Mostrar la tabla con estilo
+            # Mostrar tabla sin índice
             st.dataframe(df_final_view.style.apply(colorear_filas, axis=1), hide_index=True)
 
         else:
