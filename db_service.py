@@ -304,7 +304,7 @@ def create_coupon_batch(
 def get_activity_report(filters: str):
     """Obtiene el reporte detallado de cupones individuales."""
     token = st.session_state.get('token')
-    # Añadir branch_permissions
+    
     select_params = (
         "id,consecutive,is_redeemed,redemption_date,invoice_number,creation_date,expiration_date,"
         "base_value_colones,base_value_dolares,branch_permissions," 
@@ -312,6 +312,7 @@ def get_activity_report(filters: str):
         "branch:redemption_branch_id(name),"
         "user:redeemed_by_user_id(username)"
     ).replace(' ', '')
+    
     url = f"{POSTGREST_ENDPOINT}/coupons?select={select_params}"
     all_params = [f for f in [filters, "order=creation_date.desc"] if f]
     url_final = url + ("&" + "&".join(all_params) if all_params else "")
@@ -322,7 +323,7 @@ def get_activity_report(filters: str):
         if not data: return pd.DataFrame()
 
         df = pd.DataFrame(data)
-        branch_map = get_branch_name_map() # Obtener mapa de IDs a Nombres
+        branch_map = get_branch_name_map() 
 
         # --- Aplanamiento ---
         df['Sucursal Canje'] = df['branch'].apply(lambda x: x.get('name') if isinstance(x, dict) else 'N/A')
@@ -347,7 +348,7 @@ def get_activity_report(filters: str):
         for col in ['creation_date', 'expiration_date', 'redemption_date']:
              if col in df.columns: df[col] = pd.to_datetime(df[col], errors='coerce').dt.strftime('%Y-%m-%d %H:%M')
 
-        # Orden final interno
+        # Orden final interno (nombres técnicos)
         column_order = [
             'id', 'consecutive', 'is_redeemed', 'creation_date', 'expiration_date',
             'base_value_colones', 'base_value_dolares',
@@ -357,15 +358,17 @@ def get_activity_report(filters: str):
             'redemption_date', 'invoice_number', 'Sucursal Canje', 'Canjeado Por'
         ]
         
-        # Filtramos columnas existentes
         final_columns = [c for c in column_order if c in df.columns]
         df_final = df[final_columns]
 
-        # --- CAMBIO SOLICITADO: Renombrar columnas para visualización ---
+        # --- RENOMBRAMIENTO FINAL (Visualización Web) ---
         rename_map = {
-            'is_redeemed': 'Canjeado',
+            'consecutive': 'Consecutivo',         # <--- CAMBIO SOLICITADO
+            'is_redeemed': 'Canjeado',            # <--- Causa del error en app.py si no se actualiza allá
             'creation_date': 'Fecha de Creación',
             'expiration_date': 'Fecha de Vencimiento',
+            'redemption_date': 'Dia Canjeado',    # <--- CAMBIO SOLICITADO
+            'invoice_number': '# Factura',        # <--- CAMBIO SOLICITADO
             'base_value_colones': 'Valor Cupón Colones',
             'base_value_dolares': 'Valor Cupón Dólares',
             'Valor Pagado Cupón CRC': 'Valor Real Pagado CRC',
