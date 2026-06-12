@@ -1,4 +1,4 @@
-# db_service.py (VERSIÓN FINAL - Hora Costa Rica UTC-6)
+# db_service.py (VERSIÓN ACTUALIZADA - Fechas Exactas y Zona Horaria)
 import requests
 import streamlit as st
 import pandas as pd
@@ -6,11 +6,22 @@ import json
 import uuid
 import auth
 from db_config import POSTGREST_ENDPOINT, get_headers
-# --- CAMBIO: Importar timezone para manejar UTC-6 ---
+
+# --- NUEVOS IMPORTS PARA FECHAS EXACTAS ---
+import calendar
 from datetime import datetime, timedelta, date, timezone
 
-# --- CAMBIO: Definir Zona Horaria Costa Rica (UTC-6) ---
+# --- Definir Zona Horaria Costa Rica (UTC-6) ---
 CR_TIMEZONE = timezone(timedelta(hours=-6))
+
+# --- NUEVA FUNCIÓN MATEMÁTICA DE MESES ---
+def add_exact_months(source_date, months_to_add):
+    """Suma meses exactos respetando el calendario real."""
+    month = source_date.month - 1 + months_to_add
+    year = source_date.year + month // 12
+    month = month % 12 + 1
+    day = min(source_date.day, calendar.monthrange(year, month)[1])
+    return source_date.replace(year=year, month=month, day=day)
 
 # Cache branch names for mapping in reports
 @st.cache_data(ttl=300) # Cache for 5 minutes
@@ -33,32 +44,24 @@ def get_data_table(table_name: str, select_params: str = '*'):
         response.raise_for_status()
         return response.json()
     except Exception as e:
-        # Silently fail for general use, report errors contextually
-        # st.error(f"Error loading {table_name}: {e}")
         return []
 
 def get_branches():
-    """Obtiene la lista de sucursales."""
     return get_data_table('branches')
 
 def get_roles():
-    """Obtiene la lista de roles."""
     return get_data_table('roles')
 
 def get_types():
-    """Obtiene la lista de tipos/emisores (ahora 'types')."""
     return get_data_table('types')
 
 def get_promos():
-    """Obtiene la lista de promociones."""
     return get_data_table('promos')
 
 def get_validity_scopes():
-    """Obtiene la lista de alcances de validez."""
     return get_data_table('validity_scopes')
 
 def get_restrictions():
-    """Obtiene la lista de restricciones."""
     return get_data_table('restrictions')
 
 # --- CREATE ---
@@ -68,65 +71,59 @@ def create_entry(table_name: str, payload: dict, return_representation: bool = F
     token = st.session_state.get('token')
     if not token:
         st.error("Se requiere autenticación para esta acción.")
-        return None # Return None on failure
+        return None 
 
     try:
         headers = get_headers(token)
         if return_representation:
-             headers['Prefer'] = 'return=representation' # Get the created record back
+             headers['Prefer'] = 'return=representation' 
 
         response = requests.post(url, headers=headers, data=json.dumps(payload))
-        response.raise_for_status() # Raises HTTPError for bad responses (4xx or 5xx)
+        response.raise_for_status() 
 
-        # Handle response based on status code and preference
-        if return_representation and response.status_code != 204: # 204 No Content
-            return response.json() # Return the created object(s)
-        elif response.status_code == 201 or response.status_code == 204: # Created or No Content (success)
-             return True # Generic success
+        if return_representation and response.status_code != 204: 
+            return response.json() 
+        elif response.status_code == 201 or response.status_code == 204: 
+             return True 
         else:
              st.warning(f"Respuesta inesperada al crear en {table_name}: {response.status_code}")
-             return None # Unexpected status
+             return None 
 
     except requests.exceptions.HTTPError as err:
         try:
             error_msg = err.response.json().get('message', str(err))
         except json.JSONDecodeError:
-            error_msg = str(err.response.text) # Show raw text if not JSON
+            error_msg = str(err.response.text) 
         except Exception:
              error_msg = str(err)
         st.error(f"Error al crear en {table_name}: {error_msg}")
-        return None # Return None on failure
+        return None 
     except Exception as e:
         st.error(f"Error inesperado al crear en {table_name}: {e}")
-        return None # Return None on failure
+        return None 
 
 def create_branch(name: str, address: str):
-    """Inserta una nueva sucursal."""
     result = create_entry('branches', {'name': name, 'address': address})
     if result: st.success(f"Sucursal '{name}' creada.")
     return result is not None
 
 def create_type(name: str):
-    """Inserta un nuevo tipo (anteriormente emisor)."""
     result = create_entry('types', {'type_name': name})
     if result: st.success(f"Tipo/Campaña '{name}' creado.")
     return result is not None
 
 def create_promo(type_name: str, is_percentage: bool, is_cash_value: bool, is_product: bool, value: float, description: str):
-    """Inserta un nuevo tipo de promoción/descuento."""
     payload = {'type_name': type_name, 'is_percentage': is_percentage, 'is_cash_value': is_cash_value, 'is_product': is_product, 'value': value, 'description': description}
     result = create_entry('promos', payload)
     if result: st.success(f"Promoción '{type_name}' creada.")
     return result is not None
 
 def create_validity_scope(scope_name: str):
-    """Inserta un nuevo alcance de validez."""
     result = create_entry('validity_scopes', {'scope_name': scope_name})
     if result: st.success(f"Alcance '{scope_name}' creado.")
     return result is not None
 
 def create_restriction(description: str):
-    """Inserta una nueva restricción."""
     result = create_entry('restrictions', {'restriction_description': description})
     if result: st.success(f"Restricción creada.")
     return result is not None
@@ -164,7 +161,6 @@ def delete_entry(table_name: str, id_value: any, id_column: str = 'id'):
     try:
         response = requests.delete(url, headers=get_headers(token))
         response.raise_for_status()
-        # Check if deletion actually happened (status code 204 No Content implies success)
         return response.status_code == 204
     except requests.exceptions.HTTPError as err:
         try: error_msg = err.response.json().get('message', str(err.response.text))
@@ -190,12 +186,12 @@ def get_next_consecutive():
         last = int(data[0]['consecutive']) if data and data[0]['consecutive'] is not None else 0
         return last + 1
     except Exception:
-        return 1 # Fallback if error or table empty
+        return 1 
 
 def calculate_discount_per_coupon(base_value: float, promo_data: dict):
     """Calcula SÓLO el monto del descuento por cupón."""
-    if base_value is None: base_value = 0.0 # Handle None case
-    discount_v = promo_data.get('value', '0.0') # Default to string '0.0'
+    if base_value is None: base_value = 0.0 
+    discount_v = promo_data.get('value', '0.0') 
     try:
         discount_v = float(discount_v)
     except (ValueError, TypeError):
@@ -204,23 +200,22 @@ def calculate_discount_per_coupon(base_value: float, promo_data: dict):
     if promo_data.get('is_percentage'):
         discount = base_value * (discount_v / 100.0)
     elif promo_data.get('is_cash_value'):
-        discount = discount_v # Direct value discount
-    else: # is_product or other cases
+        discount = discount_v 
+    else: 
         discount = 0.0
     return round(discount, 2)
 
 def create_coupon_batch(
     count: int,
-    asociado_comprador: str, # <-- Obligatorio ahora
-    # batch_name parameter removed
+    asociado_comprador: str, 
     promo_data: dict,
     value_crc: float,
     value_usd: float,
     type_id: int,
     months_valid: int,
-    branch_names: list, # Can be empty for "All"
-    scope_ids: list, # Now mandatory
-    restriction_ids: list, # Now mandatory
+    branch_names: list, 
+    scope_ids: list, 
+    restriction_ids: list, 
     user_id: str
 ):
     """Genera lote, cupones, relaciones M:M y RECIBO."""
@@ -232,14 +227,19 @@ def create_coupon_batch(
     try:
         # 1. Preparar datos básicos
         branches = get_branches(); branch_options = {b['name']: b['id'] for b in branches}
-        allowed_branch_ids = [str(branch_options[name]) for name in branch_names if name in branch_options] # Ensure IDs are strings
+        allowed_branch_ids = [str(branch_options[name]) for name in branch_names if name in branch_options] 
         start_consecutive = get_next_consecutive(); end_consecutive = start_consecutive + count - 1
         batch_uuid = str(uuid.uuid4())
         
-        # --- CAMBIO: Usar Hora Costa Rica para el vencimiento y creación ---
+        # --- CAMBIO: Fechas exactas y bloqueo de UTC ---
         now_cr = datetime.now(CR_TIMEZONE)
-        expiration_date = (now_cr + timedelta(days=months_valid * 30)).strftime("%Y-%m-%d") 
-        current_timestamp_iso = now_cr.isoformat() 
+        
+        # Forzamos formato string sin info de zona para que Supabase no sume horas por error
+        current_timestamp_iso = now_cr.strftime("%Y-%m-%dT%H:%M:%S") 
+        
+        # Cálculo exacto de meses usando la nueva función
+        exp_date_obj = add_exact_months(now_cr, months_valid)
+        expiration_date = exp_date_obj.strftime("%Y-%m-%d") 
         # --- FIN CAMBIO ---
 
         # 2. Calcular valores
@@ -252,7 +252,6 @@ def create_coupon_batch(
         # 3. GENERAR BATCH NAME (Siempre autogenerado con Asociado y Hora CR)
         base_name_part = f"{promo_data.get('type_name', 'Lote')}"
         base_name = f"{asociado_comprador.strip()}_{base_name_part}"
-        # Usamos now_cr para el nombre del archivo
         final_batch_name = f"{base_name}_{now_cr.strftime('%Y%m%d%H%M')}_{batch_uuid[:4]}"
 
         # 4. Insertar Lote (Batches)
@@ -348,7 +347,7 @@ def get_activity_report(filters: str):
         for col in ['creation_date', 'expiration_date', 'redemption_date']:
              if col in df.columns: df[col] = pd.to_datetime(df[col], errors='coerce').dt.strftime('%Y-%m-%d %H:%M')
 
-        # Orden final interno (nombres técnicos)
+        # Orden final interno
         column_order = [
             'id', 'consecutive', 'is_redeemed', 'creation_date', 'expiration_date',
             'base_value_colones', 'base_value_dolares',
@@ -361,14 +360,14 @@ def get_activity_report(filters: str):
         final_columns = [c for c in column_order if c in df.columns]
         df_final = df[final_columns]
 
-        # --- RENOMBRAMIENTO FINAL (Visualización Web) ---
+        # --- RENOMBRAMIENTO FINAL ---
         rename_map = {
-            'consecutive': 'Consecutivo',         # <--- CAMBIO SOLICITADO
-            'is_redeemed': 'Canjeado',            # <--- Causa del error en app.py si no se actualiza allá
+            'consecutive': 'Consecutivo',         
+            'is_redeemed': 'Canjeado',            
             'creation_date': 'Fecha de Creación',
             'expiration_date': 'Fecha de Vencimiento',
-            'redemption_date': 'Dia Canjeado',    # <--- CAMBIO SOLICITADO
-            'invoice_number': '# Factura',        # <--- CAMBIO SOLICITADO
+            'redemption_date': 'Dia Canjeado',    
+            'invoice_number': '# Factura',        
             'base_value_colones': 'Valor Cupón Colones',
             'base_value_dolares': 'Valor Cupón Dólares',
             'Valor Pagado Cupón CRC': 'Valor Real Pagado CRC',
@@ -395,26 +394,23 @@ def get_batch_report(filters: str = None):
         res_r = requests.get(url_r, headers=get_headers(token)); res_r.raise_for_status(); redeemed_data = res_r.json()
         redeemed_counts = pd.DataFrame(redeemed_data)['batch_id'].value_counts().to_dict() if redeemed_data else {}
         df_b['Creador'] = df_b['creator'].apply(lambda x: x.get('username') if isinstance(x, dict) else 'N/A')
-        # Robust count calculation
         df_b['Creados'] = df_b['coupons'].apply(lambda x: x[0]['count'] if isinstance(x, list) and x and 'count' in x[0] else None)
         df_b['Creados'] = df_b['Creados'].fillna(pd.to_numeric(df_b['consecutive_end'], errors='coerce') - pd.to_numeric(df_b['consecutive_start'], errors='coerce') + 1).fillna(0).astype(int)
         df_b['Canjeados'] = df_b['id'].map(redeemed_counts).fillna(0).astype(int)
         
-        # --- CAMBIO: Comparar Vencimiento con fecha CR ---
-        today_cr = datetime.now(CR_TIMEZONE).date() # Usar fecha local CR
+        today_cr = datetime.now(CR_TIMEZONE).date() 
         df_b['exp_date'] = pd.to_datetime(df_b['expiration_date'], errors='coerce').dt.date
         df_b['Vencido?'] = (df_b['exp_date'] < today_cr).fillna(False) 
-        # --- FIN CAMBIO ---
 
         df_b['Creado'] = pd.to_datetime(df_b['creation_date'], errors='coerce').dt.strftime('%Y-%m-%d')
         df_b['Vence'] = pd.to_datetime(df_b['expiration_date'], errors='coerce').dt.strftime('%Y-%m-%d')
-        # Ensure numeric types for formatting
+        
         num_cols = ['total_ref_value_crc', 'total_ref_value_usd', 'total_sale_value_crc', 'total_sale_value_usd']
         for col in num_cols: df_b[col] = pd.to_numeric(df_b[col], errors='coerce').fillna(0.0)
 
         cols = {'id': 'ID Lote', 'batch_name': 'Nombre Lote', 'Creados': 'Creados', 'Canjeados': 'Canjeados', 'Vencido?': 'Vencido?', 'consecutive_start': 'Inicio', 'consecutive_end': 'Fin', 'total_ref_value_crc': 'Ref CRC', 'total_ref_value_usd': 'Ref USD', 'total_sale_value_crc': 'Venta CRC', 'total_sale_value_usd': 'Venta USD', 'Creador': 'Creador', 'Creado': 'Creado', 'Vence': 'Vence'}
-        df_report = df_b.rename(columns=cols) # Rename first
-        final_cols_lote = [c for c in cols.values() if c in df_report.columns] # Select existing columns after rename
+        df_report = df_b.rename(columns=cols) 
+        final_cols_lote = [c for c in cols.values() if c in df_report.columns] 
         return df_report[final_cols_lote]
     except requests.exceptions.HTTPError as e:
         try: error = e.response.json().get('message', str(e.response.text))
@@ -423,19 +419,17 @@ def get_batch_report(filters: str = None):
 
 
 def get_receipt_data(receipt_id: int):
-    """Obtiene los datos guardados de un recibo por su ID (PK)."""
     token = st.session_state.get('token')
     url = f"{POSTGREST_ENDPOINT}/batch_receipts?id=eq.{receipt_id}&select=*"
     try:
         response = requests.get(url, headers=get_headers(token)); response.raise_for_status()
         data = response.json()
-        return data[0] if data else None # Return the first (and only) receipt found
+        return data[0] if data else None 
     except Exception as e:
         st.error(f"Error al obtener datos del recibo ID {receipt_id}: {e}")
         return None
 
 def get_all_receipts():
-    """Obtiene lista básica de todos los recibos (ID, nombre, fecha) para selección."""
     token = st.session_state.get('token')
     url = f"{POSTGREST_ENDPOINT}/batch_receipts?select=id,batch_name,created_at&order=created_at.desc"
     try:
@@ -444,7 +438,6 @@ def get_all_receipts():
         if not data: return pd.DataFrame()
 
         df = pd.DataFrame(data)
-        # Format date and rename for display
         df['created_at'] = pd.to_datetime(df['created_at'], errors='coerce').dt.strftime('%Y-%m-%d %H:%M')
         df.rename(columns={'id':'Recibo ID', 'batch_name':'Nombre Lote', 'created_at':'Fecha Generado'}, inplace=True)
         return df
@@ -459,7 +452,6 @@ def get_all_receipts():
 # =================================================================
 
 def render_config_management():
-    """Módulo de Streamlit para la gestión de datos maestros (Solo Admin)."""
     import streamlit as st
     import pandas as pd
     import auth
@@ -497,7 +489,6 @@ def render_config_management():
         if branches_data:
             for branch in branches_data:
                 form_key_edit = f"edit_branch_{branch['id']}"
-                # --- ¡CORRECCIÓN AQUÍ! --- Remove key= argument from expander ---
                 with st.expander(f"ID {branch['id']} - {branch.get('name', 'N/A')}"):
                     with st.form(form_key_edit):
                         new_name = st.text_input("Nombre", value=branch.get('name', ''), key=f"name_b_{branch['id']}")
@@ -537,7 +528,6 @@ def render_config_management():
         st.markdown("#### Editar / Eliminar Tipos/Campañas")
         if types_data:
             for type_item in types_data:
-                 # --- ¡CORRECCIÓN AQUÍ! --- Remove key= argument from expander ---
                 with st.expander(f"ID {type_item['id']} - {type_item.get('type_name', 'N/A')}"):
                      with st.form(f"edit_type_{type_item['id']}"):
                         new_name = st.text_input("Nombre", value=type_item.get('type_name', ''), key=f"name_t_{type_item['id']}")
@@ -584,7 +574,6 @@ def render_config_management():
                 types = ["Porcentaje", "Valor Fijo", "Producto"]; idx = 0
                 if promo.get('is_cash_value'): idx = 1
                 elif promo.get('is_product'): idx = 2
-                # --- ¡CORRECCIÓN AQUÍ! --- Remove key= argument from expander ---
                 with st.expander(f"ID {promo['id']} - {promo.get('type_name', 'N/A')}"):
                     with st.form(f"edit_promo_{promo['id']}"):
                         col_e1, col_e2 = st.columns([2,1])
@@ -631,7 +620,6 @@ def render_config_management():
         st.markdown("#### Editar / Eliminar Alcances")
         if scopes_data:
             for scope in scopes_data:
-                 # --- ¡CORRECCIÓN AQUÍ! --- Remove key= argument from expander ---
                  with st.expander(f"ID {scope['id']} - {scope.get('scope_name', 'N/A')}"):
                     with st.form(f"edit_scope_{scope['id']}"):
                         new_name = st.text_input("Nombre", value=scope.get('scope_name', ''), key=f"name_s_{scope['id']}")
@@ -671,7 +659,6 @@ def render_config_management():
         if restrictions_data:
              for restriction in restrictions_data:
                  desc_short = restriction.get('restriction_description','')[:50]
-                 # --- ¡CORRECCIÓN AQUÍ! --- Remove key= argument from expander ---
                  with st.expander(f"ID {restriction['id']} - {desc_short}..."):
                     with st.form(f"edit_restriction_{restriction['id']}"):
                         new_desc = st.text_area("Descripción", value=restriction.get('restriction_description',''), key=f"desc_r_{restriction['id']}")
@@ -692,12 +679,7 @@ def render_config_management():
 # --- AGREGAR AL FINAL DE db_service.py ---
 
 def get_batch_details_for_reprint(batch_id: str):
-    """
-    Obtiene todos los datos necesarios para regenerar las imágenes QR de un lote existente.
-    Trae cupones, scopes y restrictions.
-    """
     token = st.session_state.get('token')
-    # Consulta compleja para traer el cupón con sus relaciones
     select_query = (
         "id,consecutive,expiration_date,branch_permissions,"
         "coupon_scopes(validity_scopes(scope_name)),"
@@ -715,19 +697,11 @@ def get_batch_details_for_reprint(batch_id: str):
         return []
 
 def delete_batch(batch_id: str):
-    """
-    Elimina un lote completo.
-    NOTA: Supabase debe tener 'ON DELETE CASCADE' configurado en las FK.
-    Si no, habría que borrar tablas hijas manualmente primero.
-    Intentamos borrar el Batch padre.
-    """
     token = st.session_state.get('token')
     if not token: return False
     
-    # 1. Borrar el Recibo asociado (Opcional, si no hay cascada)
     delete_entry('batch_receipts', batch_id, 'batch_id')
     
-    # 2. Borrar el Lote (Esto debería borrar los cupones en cascada)
     url = f"{POSTGREST_ENDPOINT}/batches?id=eq.{batch_id}"
     try:
         response = requests.delete(url, headers=get_headers(token))
