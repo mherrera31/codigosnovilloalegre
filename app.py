@@ -1,4 +1,4 @@
-# app.py (VERSIÓN CON MÓDULO GESTIÓN DE LOTES - REIMPRESIÓN Y BORRADO)
+# app.py (VERSIÓN CON EDITOR VISUAL Y FECHAS EXACTAS)
 import streamlit as st
 import auth
 import db_service
@@ -8,6 +8,7 @@ import qrcode
 from PIL import Image, ImageDraw, ImageFont
 import uuid
 import os
+import json
 from datetime import datetime, timedelta
 import pandas as pd
 import zipfile
@@ -74,6 +75,16 @@ def get_template_list():
         return []
 
 # --- FUNCIONES AUXILIARES ---
+def load_template_config(template_name):
+    """Descarga las coordenadas JSON desde Supabase."""
+    if not template_name or template_name == "Fondo Blanco":
+        return None
+    try:
+        file_bytes = supabase_client.storage.from_(BUCKET_NAME).download(f"{template_name}.json")
+        return json.loads(file_bytes.decode('utf-8'))
+    except Exception:
+        return None 
+
 def create_qr_card(
     data_to_encode: str, 
     template_name: str, 
@@ -81,21 +92,28 @@ def create_qr_card(
     scopes_text_list: list, 
     restrictions_text_list: list, 
     branch_names: list, 
-    expiration: str, 
-    consecutive: str
+    consecutive: str,
+    layout_config: dict = None
 ):
-    """
-    Genera JPG de tarjeta.
-    """
+    """Genera JPG de tarjeta con posiciones dinámicas."""
+    
+    # POSICIONES POR DEFECTO
+    if not layout_config:
+        layout_config = {
+            'qr_x': CARD_WIDTH_PX - QR_SIZE_PX - BORDER_PX, 'qr_y': BORDER_PX + 30, 'qr_size': QR_SIZE_PX,
+            'cons_x': CARD_WIDTH_PX - QR_SIZE_PX - BORDER_PX + 80, 'cons_y': BORDER_PX + 30 + QR_SIZE_PX + 10,
+            'suc_x': CARD_WIDTH_PX - QR_SIZE_PX - BORDER_PX + 20, 'suc_y': BORDER_PX + 30 + QR_SIZE_PX + 70,
+            'val_x': 50, 'val_y': 350
+        }
+
     card_img = None
     try:
-        if template_name:
+        if template_name and template_name != "Fondo Blanco":
             file_bytes = supabase_client.storage.from_(BUCKET_NAME).download(f"{template_name}.png")
             card_img = Image.open(io.BytesIO(file_bytes)).convert('RGB')
             if card_img.size != (CARD_WIDTH_PX, CARD_HEIGHT_PX):
                 card_img = card_img.resize((CARD_WIDTH_PX, CARD_HEIGHT_PX))
     except Exception as e:
-        st.error(f"Error al cargar plantilla '{template_name}': {e}. Usando fondo blanco.")
         card_img = None 
 
     if card_img is None: 
@@ -105,105 +123,69 @@ def create_qr_card(
     
     # --- FUENTES ---
     try:
-        validez_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=30, encoding="utf-8") 
-        sucursal_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=24, encoding="utf-8") 
-        consecutive_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=55, encoding="utf-8") 
-        footer_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=24, encoding="utf-8")  
-        web_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=24, encoding="utf-8")
+        validez_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=30) 
+        sucursal_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=24) 
+        consecutive_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=55) 
+        footer_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=24)  
+        web_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=24)
     except IOError:
-        st.error("Error: No se encontraron los archivos de fuente (DejaVuSans). Usando default.")
         validez_font = footer_font = consecutive_font = sucursal_font = web_font = ImageFont.load_default()
 
     # Generar QR
-    qr = qrcode.QRCode(1, qrcode.constants.ERROR_CORRECT_M, 8, 2); qr.add_data(data_to_encode); qr.make(fit=True); qr_img = qr.make_image(fill_color="black", back_color="white").convert('RGB')
+    qr = qrcode.QRCode(1, qrcode.constants.ERROR_CORRECT_M, 8, 2); qr.add_data(data_to_encode); qr.make(fit=True); 
+    qr_img = qr.make_image(fill_color="black", back_color="white").convert('RGB')
     
     # --- TEXTOS ---
     validez_text = "Validez: " + ". ".join(scopes_text_list) if scopes_text_list else ""
-    date_text = f"Válido hasta: {expiration}"
     terms_text = "Ver Términos y Condiciones en"
     web_text = "www.restauranteelnovilloalegre.com"
     cons_text = f"{consecutive}"
-    
-    if not branch_names: 
-        sucursales_text = "Válido en todas las sucursales"
-        branch_names_list = ["Válido en todas", "las sucursales"]
-    else:
-        branch_names_list = branch_names
+    branch_names_list = branch_names if branch_names else ["Válido en todas", "las sucursales"]
 
-    # --- POSICIONAMIENTO (ZONAS) ---
+    # --- DIBUJO BASADO EN COORDENADAS DINÁMICAS ---
     
-    RIGHT_COLUMN_START_X = CARD_WIDTH_PX - QR_SIZE_PX - BORDER_PX - 20
-    LEFT_ZONE_CENTER_X = BORDER_PX + ((RIGHT_COLUMN_START_X - BORDER_PX) / 2)
-
-    # 1. QR (Derecha, Arriba)
-    QR_X = CARD_WIDTH_PX - QR_SIZE_PX - BORDER_PX
-    QR_Y = BORDER_PX + 30
-    QR_POS = (int(QR_X), int(QR_Y))
-
-    # 2. Consecutivo (Centrado debajo del QR)
-    cons_width = consecutive_font.getlength(cons_text)
-    CONS_X = QR_X + (QR_SIZE_PX / 2) - (cons_width / 2)
-    CONS_Y = QR_Y + QR_SIZE_PX + 10
+    # 1. QR
+    qr_scaled = qr_img.resize((int(layout_config['qr_size']), int(layout_config['qr_size'])))
+    card_img.paste(qr_scaled, (int(layout_config['qr_x']), int(layout_config['qr_y'])))
     
-    # 3. Sucursales (Lista vertical debajo del Consecutivo)
-    cons_bbox = consecutive_font.getbbox(cons_text)
-    cons_height = cons_bbox[3] - cons_bbox[1]
-    current_suc_y = CONS_Y + cons_height + 40 
+    # 2. Consecutivo
+    draw.text((int(layout_config['cons_x']), int(layout_config['cons_y'])), cons_text, fill=(0,0,0), font=consecutive_font)
     
-    # Dibujar Columna Derecha
-    qr_scaled = qr_img.resize((QR_SIZE_PX, QR_SIZE_PX))
-    card_img.paste(qr_scaled, QR_POS)
-    draw.text((int(CONS_X), int(CONS_Y)), cons_text, fill=(0,0,0), font=consecutive_font)
-    
+    # 3. Sucursales
+    current_suc_y = int(layout_config['suc_y'])
     for line in branch_names_list:
-        w = sucursal_font.getlength(line)
-        x = QR_X + (QR_SIZE_PX / 2) - (w / 2)
-        draw.text((int(x), int(current_suc_y)), line, fill=(0,0,0), font=sucursal_font)
+        draw.text((int(layout_config['suc_x']), current_suc_y), line, fill=(0,0,0), font=sucursal_font)
         current_suc_y += 26 
 
-    # --- FOOTER (Abajo al centro) ---
-    bbox_web = web_font.getbbox(web_text); h_web = bbox_web[3] - bbox_web[1]
-    bbox_terms = footer_font.getbbox(terms_text); h_terms = bbox_terms[3] - bbox_terms[1]
-    bbox_date = footer_font.getbbox(date_text); h_date = bbox_date[3] - bbox_date[1]
-    
-    Y_WEB = CARD_HEIGHT_PX - BORDER_PX - h_web
-    Y_TERMS = Y_WEB - h_terms - 8 
-    Y_DATE = Y_TERMS - h_date - 8
-    
-    CARD_CENTER_X = CARD_WIDTH_PX / 2
-    
-    X_WEB = CARD_CENTER_X - (web_font.getlength(web_text) / 2)
-    X_TERMS = CARD_CENTER_X - (footer_font.getlength(terms_text) / 2)
-    X_DATE = CARD_CENTER_X - (footer_font.getlength(date_text) / 2)
-    
-    draw.text((int(X_DATE), int(Y_DATE)), date_text, fill=(0,0,0), font=footer_font)
-    draw.text((int(X_TERMS), int(Y_TERMS)), terms_text, fill=(0,0,0), font=footer_font)
-    draw.text((int(X_WEB), int(Y_WEB)), web_text, fill=(0,0,0), font=web_font)
-
-    # --- VALIDEZ (Centrado en zona izquierda) ---
+    # 4. Validez
     validez_lines = textwrap.wrap(validez_text, width=35)
-    
-    bbox_val = validez_font.getbbox("A")
+    bbox_val = validez_font.getbbox("A") if hasattr(validez_font, 'getbbox') else (0,0,0,30)
     h_val_line = (bbox_val[3] - bbox_val[1]) + 10
-    total_h_val = len(validez_lines) * h_val_line
-    
-    Y_START_VAL = Y_DATE - total_h_val - 20 
-    
-    current_y_val = Y_START_VAL
+    current_y_val = int(layout_config['val_y'])
     for line in validez_lines:
-        w = validez_font.getlength(line)
-        x = LEFT_ZONE_CENTER_X - (w / 2) 
-        draw.text((int(x), int(current_y_val)), line, fill=(0,0,0), font=validez_font)
+        draw.text((int(layout_config['val_x']), current_y_val), line, fill=(0,0,0), font=validez_font)
         current_y_val += h_val_line
 
-    card_img.save(output_path, "JPEG", quality=95); return output_path
+    # 5. Footer Web (Fijo abajo al centro)
+    bbox_web = web_font.getbbox(web_text) if hasattr(web_font, 'getbbox') else (0,0,0,24)
+    h_web = bbox_web[3] - bbox_web[1]
+    bbox_terms = footer_font.getbbox(terms_text) if hasattr(footer_font, 'getbbox') else (0,0,0,24)
+    h_terms = bbox_terms[3] - bbox_terms[1]
+    Y_WEB = CARD_HEIGHT_PX - BORDER_PX - h_web
+    Y_TERMS = Y_WEB - h_terms - 8 
+    CARD_CENTER_X = CARD_WIDTH_PX / 2
+    draw.text((int(CARD_CENTER_X - (footer_font.getlength(terms_text) / 2)), int(Y_TERMS)), terms_text, fill=(0,0,0), font=footer_font)
+    draw.text((int(CARD_CENTER_X - (web_font.getlength(web_text) / 2)), int(Y_WEB)), web_text, fill=(0,0,0), font=web_font)
+
+    card_img.save(output_path, "JPEG", quality=95)
+    return output_path
 
 def generate_design_template(output_filename):
     """Genera guía JPG 8.5x5cm."""
     img = Image.new('RGB', (CARD_WIDTH_PX, CARD_HEIGHT_PX), (230, 230, 230)); draw = ImageDraw.Draw(img)
     try:
-        title_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=40, encoding="utf-8")
-        main_font = ImageFont.truetype("DejaVuSans.ttf", size=24, encoding="utf-8")
+        title_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=40)
+        main_font = ImageFont.truetype("DejaVuSans.ttf", size=24)
     except IOError:
         title_font = main_font = ImageFont.load_default()
     draw.text((BORDER_PX, BORDER_PX), f"GUÍA HORIZONTAL ({CARD_WIDTH_PX}x{CARD_HEIGHT_PX} px)", fill=(0,0,0), font=title_font)
@@ -244,7 +226,6 @@ def format_receipt(receipt_data):
 
 # --- LÓGICA DE INICIALIZACIÓN Y LOGIN ---
 if 'logged_in' not in st.session_state: st.session_state['logged_in'] = False
-# ... (rest of state initialization)
 if not auth.is_authenticated():
     st.image(LOGO_URL, width=300); st.title("QR-Creator"); auth.login_ui(); st.stop()
 
@@ -291,7 +272,6 @@ elif app_mode == "📲 Escáner":
 
 # --- MÓDULO CREADOR QR ---
 elif app_mode == "🛠️ Creador QR":
-    # Load master data
     promos = db_service.get_promos(); branches = db_service.get_branches()
     types = db_service.get_types(); scopes = db_service.get_validity_scopes()
     restrictions = db_service.get_restrictions()
@@ -306,11 +286,9 @@ elif app_mode == "🛠️ Creador QR":
     with tab_creator:
         st.header("Creación de Tarjetas QR")
 
-        # --- Form Handling ---
         if 'form_key_counter' not in st.session_state: st.session_state['form_key_counter'] = 0
         form_key = f"qr_creator_form_{st.session_state['form_key_counter']}"
         
-        # --- Form Definition ---
         with st.form(form_key, clear_on_submit=False):
             st.subheader("Configuración del Lote")
             promo_list = ["-- Seleccione Promoción --"] + sorted(list(promo_options.keys()))
@@ -380,7 +358,6 @@ elif app_mode == "🛠️ Creador QR":
                 default_count = None if st.session_state.get('clear_form_inputs') else st.session_state.get(f'{form_key}_count')
                 count = st.number_input("Cantidad (*Obligatorio*)", min_value=1, max_value=1000, value=default_count, placeholder="1", key=f'{form_key}_count')
 
-            # --- Live Calculation Display ---
             st.divider()
             st.subheader("Cálculo Estimado")
             
@@ -432,13 +409,11 @@ elif app_mode == "🛠️ Creador QR":
 
             st.divider()
 
-            # --- Submit Button ---
             submitted = st.form_submit_button("✔️ Generar Lote")
 
             if submitted:
                 st.session_state['show_preview'] = False
                 
-                # --- VALIDACIÓN FINAL ---
                 error = False
                 asoc_val = st.session_state[f"{form_key}_asoc"]
                 promo_val = st.session_state[f"{form_key}_promo"]
@@ -453,7 +428,6 @@ elif app_mode == "🛠️ Creador QR":
                 branches_val = st.session_state[f"{form_key}_branches"]
                 template_name_val = st.session_state[f"{form_key}_template"] 
 
-                # Perform checks
                 if not asoc_val: st.error("❌ 'Asociado' obligatorio."); error = True
                 if not promo_val or promo_val == "-- Seleccione Promoción --": st.error("❌ Seleccione Promoción."); error = True
                 if vcrc_val is None or vcrc_val < 0: st.error("❌ Valor Base CRC >= 0.00."); error = True
@@ -504,13 +478,7 @@ elif app_mode == "🛠️ Creador QR":
                                 for entry in coupons:
                                     path = os.path.join(GENERATED_QRS_DIR, f"{entry['consecutive']:04d}.jpg")
                                     
-                                    try:
-                                        # Formatear la fecha de la DB (YYYY-MM-DD) a DD-MM-YYYY
-                                        date_obj = datetime.strptime(entry['expiration_date'][:10], "%Y-%m-%d")
-                                        formatted_date = date_obj.strftime("%d-%m-%Y")
-                                    except Exception:
-                                        formatted_date = entry['expiration_date']
-
+                                    layout_cfg = load_template_config(template_name_for_submit)
                                     create_qr_card(
                                         entry['id'], 
                                         template_name_for_submit, 
@@ -518,8 +486,8 @@ elif app_mode == "🛠️ Creador QR":
                                         scopes_text_list, 
                                         restrictions_text_list, 
                                         branch_names_for_card, 
-                                        formatted_date, 
-                                        f"{entry['consecutive']:04d}"
+                                        f"{entry['consecutive']:04d}",
+                                        layout_cfg
                                     )
                                     zf.write(path, os.path.basename(path))
                                     generated_paths.append(path) 
@@ -543,9 +511,6 @@ elif app_mode == "🛠️ Creador QR":
                 else:
                     st.session_state['clear_form_inputs'] = False
         
-        # --- FIN DEL st.form ---
-        
-        # --- Vista Previa (FUERA del form) ---
         st.divider()
         st.subheader("Vista Previa")
         
@@ -560,7 +525,6 @@ elif app_mode == "🛠️ Creador QR":
                     live_restric = st.session_state.get(f"{form_key}_restrictions", [])
                     live_branches = st.session_state.get(f"{form_key}_branches", [])
                     live_all_branches = st.session_state.get(f"{form_key}_all_branches", False)
-                    live_months = st.session_state.get(f"{form_key}_months", 3)
 
                     template_name_for_preview = None
                     if live_template_name_str != "Fondo Blanco":
@@ -572,19 +536,16 @@ elif app_mode == "🛠️ Creador QR":
 
                     preview_path = os.path.join(GENERATED_QRS_DIR, "preview.jpg")
                     
-                    # --- INICIO CAMBIO: Usar CR_TIMEZONE para la vista previa ---
-                    preview_date = (datetime.now(CR_TIMEZONE) + timedelta(days=live_months * 30)).strftime("%d-%m-%Y")
-                    # --- FIN CAMBIO ---
-
+                    layout_cfg_preview = load_template_config(template_name_for_preview)
                     create_qr_card(
                         "PREVIEW-ID-12345678",
                         template_name_for_preview, 
                         preview_path,
                         live_scopes,
-                        [], # Empty restrictions
+                        [], 
                         live_branch_list,
-                        preview_date, # <-- Fecha formateada
-                        "0000"
+                        "0000",
+                        layout_cfg_preview
                     )
                     st.image(preview_path, caption="Vista previa generada con los datos actuales del formulario.", width=700)
                     
@@ -597,8 +558,6 @@ elif app_mode == "🛠️ Creador QR":
         else:
             st.caption("Presione 'Ver/Actualizar Vista Previa' para previsualizar la tarjeta con los datos del formulario.")
 
-
-        # --- Display Receipt and Download (Outside Form) ---
         if st.session_state.get('show_receipt') and st.session_state.get('last_receipt_data'):
             st.divider()
             st.subheader("🧾 Recibo Generado")
@@ -626,6 +585,68 @@ elif app_mode == "🛠️ Creador QR":
     with tab_template:
         st.header("Gestión de Plantillas de Diseño (en Supabase)")
         
+        # --- NUEVO EDITOR VISUAL ---
+        st.subheader("🛠️ Editor Visual de Plantilla")
+        templates_for_editor = get_template_list()
+        
+        if templates_for_editor:
+            editor_template = st.selectbox("Seleccione plantilla a editar", templates_for_editor)
+            
+            # Cargar config actual o por defecto
+            current_cfg = load_template_config(editor_template)
+            if not current_cfg:
+                current_cfg = {
+                    'qr_x': 680, 'qr_y': 80, 'qr_size': 250,
+                    'cons_x': 760, 'cons_y': 340,
+                    'suc_x': 700, 'suc_y': 400,
+                    'val_x': 50, 'val_y': 350
+                }
+
+            col_editor1, col_editor2 = st.columns([1, 1.5])
+            
+            with col_editor1:
+                st.markdown("**Controles de Posición**")
+                new_cfg = {}
+                new_cfg['qr_size'] = st.slider("Tamaño del QR", 100, 400, int(current_cfg['qr_size']))
+                new_cfg['qr_x'] = st.slider("Posición QR (Izquierda/Derecha)", 0, CARD_WIDTH_PX, int(current_cfg['qr_x']))
+                new_cfg['qr_y'] = st.slider("Posición QR (Arriba/Abajo)", 0, CARD_HEIGHT_PX, int(current_cfg['qr_y']))
+                st.divider()
+                new_cfg['cons_x'] = st.slider("Posición Consecutivo (Izquierda/Derecha)", 0, CARD_WIDTH_PX, int(current_cfg['cons_x']))
+                new_cfg['cons_y'] = st.slider("Posición Consecutivo (Arriba/Abajo)", 0, CARD_HEIGHT_PX, int(current_cfg['cons_y']))
+                st.divider()
+                new_cfg['val_x'] = st.slider("Posición Texto Validez (X)", 0, CARD_WIDTH_PX, int(current_cfg['val_x']))
+                new_cfg['val_y'] = st.slider("Posición Texto Validez (Y)", 0, CARD_HEIGHT_PX, int(current_cfg['val_y']))
+                st.divider()
+                new_cfg['suc_x'] = st.slider("Posición Sucursales (X)", 0, CARD_WIDTH_PX, int(current_cfg['suc_x']))
+                new_cfg['suc_y'] = st.slider("Posición Sucursales (Y)", 0, CARD_HEIGHT_PX, int(current_cfg['suc_y']))
+
+                if st.button("💾 Guardar Configuración", type="primary"):
+                    json_data = json.dumps(new_cfg).encode('utf-8')
+                    try:
+                        supabase_client.storage.from_(BUCKET_NAME).upload(
+                            path=f"{editor_template}.json", 
+                            file=json_data, 
+                            file_options={"content-type": "application/json", "upsert": "true"}
+                        )
+                        st.success("¡Configuración guardada exitosamente!")
+                    except Exception as e:
+                        st.error(f"Error guardando configuración: {e}")
+
+            with col_editor2:
+                st.markdown("**Vista Previa en Vivo**")
+                preview_editor_path = os.path.join(GENERATED_QRS_DIR, "editor_preview.jpg")
+                create_qr_card(
+                    "PREVIEW-123", editor_template, preview_editor_path, 
+                    ["Solo Cena", "Válido Lunes a Jueves"], [], 
+                    ["Multiplaza", "Escazú"], "0001", new_cfg
+                )
+                st.image(preview_editor_path, use_column_width=True)
+            
+            st.divider()
+        else:
+            st.info("Suba al menos una plantilla para usar el editor visual.")
+
+        
         st.subheader("1. Subir Nueva Plantilla")
         with st.form("template_form", clear_on_submit=True):
             template_name = st.text_input("Nombre de la Plantilla (ej: Navidad2025, DiaPadre)")
@@ -649,14 +670,12 @@ elif app_mode == "🛠️ Creador QR":
                             if img.size != (CARD_WIDTH_PX, CARD_HEIGHT_PX):
                                 st.error(f"Error: La imagen debe ser de {CARD_WIDTH_PX}x{CARD_HEIGHT_PX} píxeles. La subida es de {img.size[0]}x{img.size[1]}px.")
                             else:
-                                # --- INICIO CORRECCIÓN: .getvalue() en lugar de .getbuffer() ---
                                 file_bytes = up_file.getvalue() 
                                 supabase_client.storage.from_(BUCKET_NAME).upload(
                                     path=save_name, 
-                                    file=file_bytes, # <-- Ahora son bytes
+                                    file=file_bytes, 
                                     file_options={"content-type": "image/png"}
                                 )
-                                # --- FIN CORRECCIÓN ---
                                 st.success(f"Plantilla '{template_name}' guardada en el bucket.")
                                 st.cache_data.clear() 
                                 st.rerun()
@@ -683,6 +702,13 @@ elif app_mode == "🛠️ Creador QR":
                     if st.button("Eliminar Plantilla", key=f"delete_{t_name}", type="primary"):
                         try:
                             supabase_client.storage.from_(BUCKET_NAME).remove([f"{t_name}.png"])
+                            
+                            # Borrar el JSON si existe
+                            try:
+                                supabase_client.storage.from_(BUCKET_NAME).remove([f"{t_name}.json"])
+                            except:
+                                pass
+                                
                             st.success(f"Plantilla '{t_name}' eliminada del bucket.")
                             st.cache_data.clear()
                             st.rerun()
@@ -705,15 +731,12 @@ elif app_mode == "📦 Gestión de Lotes":
     st.header("Gestión Administrativa de Lotes")
     st.markdown("Desde aquí puede **volver a descargar los QRs** de un lote existente o **eliminarlo** permanentemente.")
 
-    # 1. Obtener lista de lotes
     df_batches = db_service.get_batch_report()
     
     if not df_batches.empty:
-        # Mostrar tabla resumen
         st.dataframe(df_batches, use_container_width=True, hide_index=True)
         st.divider()
 
-        # Selector de lote
         batch_options = {f"{row['Nombre Lote']} (Creado: {row['Creado']})": row['ID Lote'] for _, row in df_batches.iterrows()}
         selected_batch_name = st.selectbox("Seleccione un Lote para gestionar:", ["-- Seleccione --"] + list(batch_options.keys()))
 
@@ -723,35 +746,26 @@ elif app_mode == "📦 Gestión de Lotes":
 
             col_actions1, col_actions2 = st.columns(2)
 
-            # --- ACCIÓN 1: RE-DESCARGAR ---
             with col_actions1:
                 st.subheader("📥 Re-descargar QRs")
                 st.markdown("Genere nuevamente el archivo ZIP con los códigos QR originales.")
                 
-                # Selector de plantilla para la regeneración
                 template_list_regen = ["Fondo Blanco"] + get_template_list()
                 selected_template_regen = st.selectbox("Plantilla para reimpresión:", template_list_regen, key="regen_template")
 
                 if st.button("Generar ZIP de Reimpresión", type="primary"):
                     with st.spinner("Recuperando datos y generando imágenes..."):
-                        # 1. Obtener datos detallados del lote
                         coupons_data = db_service.get_batch_details_for_reprint(selected_batch_id)
                         
                         if coupons_data:
-                            # 2. Generar imágenes en memoria
                             zip_buffer_regen = io.BytesIO()
                             template_name_regen = None if selected_template_regen == "Fondo Blanco" else selected_template_regen
 
                             with zipfile.ZipFile(zip_buffer_regen, 'w', zipfile.ZIP_DEFLATED) as zf:
                                 for coupon in coupons_data:
-                                    # Parsear scopes
                                     scopes_list = [s['validity_scopes']['scope_name'] for s in coupon.get('coupon_scopes', []) if s.get('validity_scopes')]
-                                    # Parsear restrictions (aunque no se usen en el diseño actual, por consistencia)
                                     restric_list = [r['restrictions']['restriction_description'] for r in coupon.get('coupon_restrictions', []) if r.get('restrictions')]
                                     
-                                    # Parsear Branches (Ids a Nombres) - Esto es un poco más complejo porque la DB guarda IDs en el array
-                                    # Simplificación: Si es null es "Todas". Si tiene IDs, necesitamos mapearlos.
-                                    # Para reimpresión rápida, asumiremos "Todas" si es null, o intentaremos resolver nombres si tenemos el mapa.
                                     branch_ids = coupon.get('branch_permissions')
                                     branch_names_regen = []
                                     if branch_ids:
@@ -759,16 +773,10 @@ elif app_mode == "📦 Gestión de Lotes":
                                         b_map = {str(b['id']): b['name'] for b in all_branches}
                                         branch_names_regen = [b_map.get(str(bid), "Sucursal") for bid in branch_ids]
 
-                                    # Fecha
-                                    try:
-                                        date_obj = datetime.strptime(coupon['expiration_date'][:10], "%Y-%m-%d")
-                                        fmt_date = date_obj.strftime("%d-%m-%Y")
-                                    except: fmt_date = coupon['expiration_date']
-
-                                    # Path temporal
                                     fname = f"{coupon['consecutive']:04d}.jpg"
                                     path = os.path.join(GENERATED_QRS_DIR, fname)
 
+                                    layout_cfg_regen = load_template_config(template_name_regen)
                                     create_qr_card(
                                         coupon['id'],
                                         template_name_regen,
@@ -776,8 +784,8 @@ elif app_mode == "📦 Gestión de Lotes":
                                         scopes_list,
                                         restric_list,
                                         branch_names_regen,
-                                        fmt_date,
-                                        f"{coupon['consecutive']:04d}"
+                                        f"{coupon['consecutive']:04d}",
+                                        layout_cfg_regen
                                     )
                                     zf.write(path, fname)
                             
@@ -792,7 +800,6 @@ elif app_mode == "📦 Gestión de Lotes":
                         else:
                             st.error("No se encontraron cupones para este lote.")
 
-            # --- ACCIÓN 2: ELIMINAR ---
             with col_actions2:
                 st.subheader("🗑️ Eliminar Lote")
                 st.warning("⚠️ ESTA ACCIÓN ES IRREVERSIBLE. Borrará el lote, todos sus cupones y el historial de canjes.")
@@ -813,12 +820,10 @@ elif app_mode == "📦 Gestión de Lotes":
 
 # --- MÓDULO REPORTES ---
 elif app_mode == "📊 Reportes":
-    # --- CAMBIO: Permitir acceso a Admin Y Contabilidad ---
     if user_role not in ['Admin', 'Contabilidad']: st.error("Acceso denegado."); st.stop()
     st.header("Reportes")
     tab_cupones, tab_lotes, tab_recibos = st.tabs(["Cupones Emitidos", "Lotes", "Recibos de Lote"])
 
-    # --- Tab Cupones ---
     with tab_cupones:
         st.subheader("Detalle de Cupones Emitidos")
         st.sidebar.header("Filtros Reporte Cupones")
@@ -833,11 +838,9 @@ elif app_mode == "📊 Reportes":
         if not df_coupons.empty:
             from datetime import datetime
 
-            # --- 1. CÁLCULOS ---
             df_coupons['temp_fecha_venc'] = pd.to_datetime(df_coupons['Fecha de Vencimiento'], errors='coerce')
             
             total_qrs = len(df_coupons)
-            # Usamos la columna booleana original para sumar antes de convertirla a texto
             redeemed_qrs = df_coupons['Canjeado'].sum()
             sin_canjear_qrs = total_qrs - redeemed_qrs
             
@@ -846,15 +849,12 @@ elif app_mode == "📊 Reportes":
                 (df_coupons['temp_fecha_venc'] < datetime.now())
             ])
 
-            # Métricas
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("Total", f"{total_qrs} 🎟️")
             c2.metric("Canjeados", f"{redeemed_qrs} ✅")
             c3.metric("Sin Canjear", f"{sin_canjear_qrs} ⏳")
             c4.metric("Vencidos", f"{vencidos_qrs} ⚠️")
             st.divider()
-
-            # --- 2. PREPARACIÓN VISUAL ---
             
             def obtener_estado(row):
                 if row['Canjeado']: return "Canjeado"
@@ -862,38 +862,25 @@ elif app_mode == "📊 Reportes":
                 else: return "Activo"
 
             df_coupons['Estado'] = df_coupons.apply(obtener_estado, axis=1)
-
-            # Convertir bool a Texto (para que se vea NEGRO sobre el verde)
             df_coupons['Canjeado'] = df_coupons['Canjeado'].apply(lambda x: "SÍ ✅" if x else "NO")
 
-            # --- CAMBIO AQUÍ: Agregamos 'id' a la lista de exclusión ---
-            # Excluimos: Estado (porque lo ponemos manual al inicio), Canjeado (igual), fecha temp y el ID
             cols_to_exclude = ['Estado', 'Canjeado', 'temp_fecha_venc', 'id'] 
-            
-            # Construimos la vista final: Estado + Canjeado + El resto (menos las excluidas)
             cols = ['Estado', 'Canjeado'] + [c for c in df_coupons.columns if c not in cols_to_exclude]
             df_final_view = df_coupons[cols].copy()
 
-            # --- 3. ESTILOS ---
             def colorear_filas(row):
                 if row['Estado'] == 'Vencido':
-                    # AMARILLO ORO (#ffd700) con TEXTO NEGRO
                     return ['background-color: #ffd700; color: black'] * len(row)
-                
                 elif row['Estado'] == 'Canjeado':
-                    # VERDE LIMA PURO (#32CD32) con TEXTO NEGRO y NEGRITA
                     return ['background-color: #32CD32; color: black; font-weight: bold'] * len(row)
-                
                 else:
                     return [''] * len(row)
 
-            # Mostrar tabla sin índice
             st.dataframe(df_final_view.style.apply(colorear_filas, axis=1), hide_index=True)
 
         else:
             st.info("No hay cupones con esos filtros.")
 
-    # --- Tab Lotes ---
     with tab_lotes:
         st.subheader("Resumen de Lotes Creados")
         df_batches = db_service.get_batch_report()
@@ -909,7 +896,6 @@ elif app_mode == "📊 Reportes":
             c1,c2,c3 = st.columns(3); c1.metric("Lotes", f"{total_lotes}"); c2.metric("Total Creados", f"{int(total_creados)}"); c3.metric("Total Canjeados", f"{int(total_canjeados)}")
         else: st.info("No hay lotes creados.")
 
-    # --- Tab Recibos ---
     with tab_recibos:
         st.subheader("Visualizar / Reimprimir Recibos de Lote")
         df_receipts_list = db_service.get_all_receipts()
